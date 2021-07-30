@@ -1,0 +1,4 @@
+# ninja log v5
+0	6742	1627288444149183772	/home/ai_fellowship/Deformable-detr/models/ops/build/temp.linux-x86_64-3.7/home/ai_fellowship/Deformable-detr/models/ops/src/cpu/ms_deform_attn_cpu.o	bee9dbba3907f38d
+0	18925	1627288456325165814	/home/ai_fellowship/Deformable-detr/models/ops/build/temp.linux-x86_64-3.7/home/ai_fellowship/Deformable-detr/models/ops/src/vision.o	4ef813672ce6de29
+0	21912	1627288459313161408	/home/ai_fellowship/Deformable-detr/models/ops/build/temp.linux-x86_64-3.7/home/ai_fellowship/Deformable-detr/models/ops/src/cuda/ms_deform_attn_cuda.o	2de18ef44d0c6dce
