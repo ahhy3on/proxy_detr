@@ -124,13 +124,19 @@ def get_args_parser():
     parser.add_argument('--num_workers', default=2, type=int)
     parser.add_argument('--cache_mode', default=False, action='store_true', help='whether to cache images on memory')
 
+    #add
+    parser.add_argument('--wandb', action='store_true')
+    parser.add_argument('--kshot', default=5, type=int)
+    parser.add_argument('--base_stage', default=True, type=bool)#base or fine
+
     return parser
 
 
 def main(args):
     utils.init_distributed_mode(args)
     print("git:\n  {}\n".format(utils.get_sha()))
-    #wandb.init(project='deformable_detr_skt_box')
+    if args.wandb:
+        wandb.init(project='deformable_detr_skt_box')
     if args.frozen_weights is not None:
         assert args.masks, "Frozen training is meant for segmentation only"
     print(args)
@@ -152,8 +158,6 @@ def main(args):
     print('number of params:', n_parameters)
 
     dataset_train = build_dataset(image_set='train',seed=1,args=args)
-    #torchvision.datasets.VOCDetection(root='./data',download=True)
-    #build_dataset(image_set='train', args=args)
     dataset_val = build_dataset(image_set='val',seed=-1, args=args)
 
     if args.distributed:
@@ -291,7 +295,7 @@ def main(args):
         if args.distributed:
             sampler_train.set_epoch(epoch)
         train_stats = train_one_epoch(
-            model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm)
+            model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm,args=args)
         lr_scheduler.step()
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
@@ -308,7 +312,7 @@ def main(args):
                 }, checkpoint_path)
 
         test_stats,coco_evaluator = evaluate(
-            model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
+            model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir,args
         )
         log_data = {}
         for k, v in train_stats.items():
@@ -338,7 +342,9 @@ def main(args):
                 log_data['test_AR_IoU = 0.50 : 0.95__large_maxDets=100'] =v[11]
 
         #print(log_data)
-        #wandb.log(log_data)
+        if args.wandb:
+            wandb.log(log_data)
+            
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in test_stats.items()},
                      'epoch': epoch,

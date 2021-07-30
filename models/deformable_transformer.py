@@ -53,7 +53,6 @@ class DeformableTransformer(nn.Module):
         else:
             self.reference_points = nn.Linear(d_model, 2)
 
-        self.batch_size=6
         self.CCE = CCE()
         self.Aggregator = Aggregator(d_model)
         ########################
@@ -155,14 +154,14 @@ class DeformableTransformer(nn.Module):
 
         memory = self.encoder(src_flatten, spatial_shapes, level_start_index, valid_ratios, lvl_pos_embed_flatten, mask_flatten)
         #query is last
-        print(memory.shape)        
+        bs = memory.shape[0]
         category_code = self.CCE(memory[:-1],spatial_shapes,targets[:-1])
         memory = memory[-1].unsqueeze(0)
-        memory = memory.repeat(self.batch_size-1,1,1)
+        memory = memory.repeat( bs-1 ,1,1)
         valid_ratios=valid_ratios[-1].unsqueeze(0)
-        valid_ratios=valid_ratios.repeat(self.batch_size-1,1,1)
+        valid_ratios=valid_ratios.repeat( bs-1 ,1,1)
         mask_flatten = mask_flatten[-1].unsqueeze(0)
-        mask_flatten = mask_flatten.repeat(self.batch_size-1,1)
+        mask_flatten = mask_flatten.repeat( bs-1 ,1)
         
         memory = self.Aggregator(category_code.unsqueeze(1),memory)   
         #import pdb
@@ -191,7 +190,6 @@ class DeformableTransformer(nn.Module):
             init_reference_out = reference_points 
         
         # decoder
-        
         hs, inter_references = self.decoder(tgt, reference_points, memory,
                                             spatial_shapes, level_start_index, valid_ratios, query_embed, mask_flatten)
 

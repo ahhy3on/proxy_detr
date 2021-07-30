@@ -72,30 +72,17 @@ class HungarianMatcher(nn.Module):
             # Also concat the target labels and boxes
             tgt_ids = torch.cat([v["labels"] for v in targets ])
             tgt_bbox = torch.cat([v["boxes"] for v in targets ])
-            #print(targets[0]['boxes'])
-            
-            #print(sum(box_cxcywh_to_xyxy(out_bbox)[:,:2] > box_cxcywh_to_xyxy(out_bbox)[:,2:]))
-            #print(sum(box_cxcywh_to_xyxy(tgt_bbox)[:,:2] > box_cxcywh_to_xyxy(tgt_bbox)[:,2:]))
+
             # Compute the classification cost.
             alpha = 0.25
             gamma = 2.0
             neg_cost_class = (1 - alpha) * (out_prob ** gamma) * (-(1 - out_prob + 1e-8).log())
             pos_cost_class = alpha * ((1 - out_prob) ** gamma) * (-(out_prob + 1e-8).log())
-            #import sys
-            #sys.exit(1)
-            #print('dfdfdfd',tgt_ids)
-            #import sys
-            #sys.exit(1)
             cost_class = pos_cost_class[:, tgt_ids] - neg_cost_class[:, tgt_ids]
-            #import sys
-            #sys.exit(1)
+
             # Compute the L1 cost between boxes
             cost_bbox = torch.cdist(out_bbox, tgt_bbox, p=1)
             
-            #import sys
-            #sys.exit(1)
-
-            #print("tgt",box_cxcywh_to_xyxy(tgt_bbox))
             # Compute the giou cost betwen boxes
             cost_giou = -generalized_box_iou(box_cxcywh_to_xyxy(out_bbox),
                                              box_cxcywh_to_xyxy(tgt_bbox))

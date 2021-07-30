@@ -19,7 +19,6 @@ import torch.utils.data
 from pycocotools import mask as coco_mask
 from pycocotools.coco import COCO
 from .torchvision_datasets import CocoDetection as TvCocoDetection
-from torchvision.datasets import VOCDetection as TvVOCDetection
 from util.misc import get_local_rank, get_local_size
 import datasets.transforms as T
 import tqdm
@@ -28,131 +27,8 @@ import json
 import os
 import sys
 import copy
+from dataset_cfg import PASCALCLASS,ID2CLASS,CLASS2ID,PASCALCLASSID
 
-PASCALCLASS = [
-    "person",
-    "bird",
-    "cat",
-    "cow",
-    "dog",
-    "horse",
-    "sheep",
-    "airplane", #aeroplane
-    "bicycle",
-    "boat",
-    "bus",
-    "car",
-    "motorcycle", #motorbike
-    "train",
-    "bottle",
-    "chair",
-    "dining table",
-    "potted plant",
-    "couch", #sofa
-    "tv", #tv/monitor
-]
-
-ID2CLASS = {
-        1: "person",
-        2: "bicycle",
-        3: "car",
-        4: "motorcycle",
-        5: "airplane",
-        6: "bus",
-        7: "train",
-        8: "truck",
-        9: "boat",
-        10: "traffic light",
-        11: "fire hydrant",
-        13: "stop sign",
-        14: "parking meter",
-        15: "bench",
-        16: "bird",
-        17: "cat",
-        18: "dog",
-        19: "horse",
-        20: "sheep",
-        21: "cow",
-        22: "elephant",
-        23: "bear",
-        24: "zebra",
-        25: "giraffe",
-        27: "backpack",
-        28: "umbrella",
-        31: "handbag",
-        32: "tie",
-        33: "suitcase",
-        34: "frisbee",
-        35: "skis",
-        36: "snowboard",
-        37: "sports ball",
-        38: "kite",
-        39: "baseball bat",
-        40: "baseball glove",
-        41: "skateboard",
-        42: "surfboard",
-        43: "tennis racket",
-        44: "bottle",
-        46: "wine glass",
-        47: "cup",
-        48: "fork",
-        49: "knife",
-        50: "spoon",
-        51: "bowl",
-        52: "banana",
-        53: "apple",
-        54: "sandwich",
-        55: "orange",
-        56: "broccoli",
-        57: "carrot",
-        58: "hot dog",
-        59: "pizza",
-        60: "donut",
-        61: "cake",
-        62: "chair",
-        63: "couch",
-        64: "potted plant",
-        65: "bed",
-        67: "dining table",
-        70: "toilet",
-        72: "tv",
-        73: "laptop",
-        74: "mouse",
-        75: "remote",
-        76: "keyboard",
-        77: "cell phone",
-        78: "microwave",
-        79: "oven",
-        80: "toaster",
-        81: "sink",
-        82: "refrigerator",
-        84: "book",
-        85: "clock",
-        86: "vase",
-        87: "scissors",
-        88: "teddy bear",
-        89: "hair drier",
-        90: "toothbrush",
-    }
-
-CLASS2ID = {v: k for k, v in ID2CLASS.items()}
-
-PASCALCLASSID = [CLASS2ID[obj] for obj in PASCALCLASS]
-print(PASCALCLASSID)
-#COCOWITHOUTPASCALID = [k for k,v in ID2CLASS if k not in PASCALCLASSID]
-
-class VOCDetection(TvVOCDetection):
-    def __init__(self,image_set,transforms, return_masks, cache_mode=False, local_rank=0, local_size=1):
-        super(VOCDetection, self).__init__('./data',image_set=image_set,download=True)
-        self._transforms = transforms
-        self.prepare = ConvertVOC(return_masks)
-
-    def __getitem__(self, idx):
-        img, target = super(VOCDetection, self).__getitem__(idx)
-        img, target = self.prepare(img, target)
-        if self._transforms is not None:
-            img, target = self._transforms(img, target)
-        return img, target
 
 class CocoDetection(TvCocoDetection):
     def __init__(self, img_folder, ann_file, transforms, return_masks, cache_mode=False, local_rank=0, local_size=1):
@@ -173,7 +49,7 @@ class CocoDetection(TvCocoDetection):
         return img, target
 
 class CocoDetection_Fewshot(TvCocoDetection):
-    def __init__(self, img_folder, ann_file, transforms, seed,return_masks, cache_mode=False, local_rank=0, local_size=1):
+    def __init__(self, img_folder, ann_file, transforms, seed, return_masks, cache_mode=False, local_rank=0, local_size=1, batch_size=1,kshot=1,base_stage=None):
         super(CocoDetection_Fewshot, self).__init__(img_folder, ann_file,
                                             cache_mode=cache_mode, local_rank=local_rank, local_size=local_size)
         self.ann_file=ann_file
@@ -181,15 +57,21 @@ class CocoDetection_Fewshot(TvCocoDetection):
         self.prepare = ConvertCocoPolysToMask(return_masks)
         self.seed = seed
         self.novel_seed=0
-        self.batch_size=6
+        self.batch_size=batch_size
         self.coco_fewshot = None
-        if seed>0:
-            self.generate_episodic_epoch()
+        if base_stage:#True -> base
+            if seed>0:#train, seed = epoch
+                self.kshot = 1000
+                self.generate_episodic_epoch()
+            
+            else:
+                self.kshot = 30
+                self.generate_episodic_epoch()
 
 
     def generate_episodic_epoch(self):
         random.seed(self.seed)
-        kshot=5
+        ############################
         data_path = self.ann_file
         data = json.load(open(data_path))
 
@@ -219,7 +101,6 @@ class CocoDetection_Fewshot(TvCocoDetection):
 
             img_ids = {}
             for a in anno[c]:
-                #if a['image_id'] not in temp_images_list:#중복된 이미지가 없도록
                     if a['image_id'] in img_ids:
                         img_ids[a['image_id']].append(a)
                     else:
@@ -228,7 +109,7 @@ class CocoDetection_Fewshot(TvCocoDetection):
             sample_shots = []
             sample_imgs = []
             print(len(img_ids.keys()))
-            for shots in [kshot]:
+            for shots in [self.kshot]:
                 while True:
                     imgs = random.sample(list(img_ids.keys()), shots)
                     
@@ -267,33 +148,35 @@ class CocoDetection_Fewshot(TvCocoDetection):
                 'licenses': data['licenses'],
                 'categories' : new_all_cats
             }
+        #############################
 
         temp_images=[]
         temp_annos=[]
-        #print(selected_anno[1]['images'][-1])
+
         random.seed(self.seed)
         available_ID = list(ID2CLASS.keys())
         random.shuffle(available_ID)
-        for category_id in available_ID:
-            idx=random.randrange(kshot)
-            temp_annos.append(selected_anno[category_id]['annotations'][idx])
-            #temp_annos.append(selected_anno[category_id]['annotations'][idx-1])
-            remain_id = list(ID2CLASS.keys())
-            remain_id.remove(category_id)
-            remain_id_list = random.sample(remain_id,self.batch_size-2)
-            for remain_id_ in remain_id_list:
-                temp_annos.append(selected_anno[remain_id_]['annotations'][idx])
-            temp_annos.append(selected_anno[category_id]['annotations'][idx-1])
+        for j in range(self.kshot):
+            for category_id in available_ID:
+                idx=random.randrange(self.kshot)
+                while idx == j:
+                    idx = random.randrange(self.kshot)
+
+                temp_annos.append(selected_anno[category_id]['annotations'][j])
+
+                remain_id = list(ID2CLASS.keys())
+                remain_id.remove(category_id)
+                remain_id_list = random.sample(remain_id,self.batch_size-2)
+                for remain_id_ in remain_id_list:
+                    temp_annos.append(selected_anno[remain_id_]['annotations'][idx])
+                temp_annos.append(selected_anno[category_id]['annotations'][idx])
 
         for k in list(ID2CLASS.keys()):
             temp_images.extend(selected_anno[k]['images'])
+
         print(len(temp_images))
         print('annos ',len(temp_annos))
         #sys.exit(1)
-        for i,a in enumerate(temp_annos):
-            print(a['image_id'])
-            if i==9:
-                break
         current_set['images'] = temp_images
         current_set['annotations'] = temp_annos
         anno_path='./data/coco/'+str(self.seed)+'.json'
@@ -320,22 +203,14 @@ class CocoDetection_Fewshot(TvCocoDetection):
             coco_fewshot = self.coco_fewshot
             ann_ids= self.ids[idx]
             target = coco_fewshot.loadAnns(ann_ids)
-            if target[0]['image_id']==351549:
-                print('!!!!!!!!',target)
             path = coco_fewshot.loadImgs([int(target[0]['image_id'])])[0]['file_name']
             img = self.get_image(path)
             #print(img.size)
         image_id = int(target[0]['image_id'])
         target = {'image_id': image_id, 'annotations': target}
-        #if idx%self.batch_size==0:#query
-        #    target['query'] = True
-        #else:#support
-        #    target['query'] = False
 
         img, target = self.prepare(img, target)
-        #if target['annotations'][0]['image_id']==351549:
-        #        print('!!!!!!!!',target)
-        #print(target)
+
         if self._transforms is not None:
             img, target = self._transforms(img, target)
         if (idx%self.batch_size)==(self.batch_size-1):#query
@@ -477,5 +352,5 @@ def build(image_set,seed, args):
 
     img_folder, ann_file = PATHS[image_set]
     dataset = CocoDetection_Fewshot(img_folder, ann_file, transforms=make_coco_transforms(image_set), seed=seed,return_masks=args.masks,
-                            cache_mode=args.cache_mode, local_rank=get_local_rank(), local_size=get_local_size())
+                            cache_mode=args.cache_mode, local_rank=get_local_rank(), local_size=get_local_size(), batch_size=args.batch_size, kshot=args.kshot, base_stage=args.base_stage)
     return dataset

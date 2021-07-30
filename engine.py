@@ -22,10 +22,13 @@ from datasets.coco_eval import CocoEvaluator
 from datasets.panoptic_eval import PanopticEvaluator
 from datasets.data_prefetcher import data_prefetcher
 import wandb
-import time
+from datasets import build_dataset, get_coco_api_from_dataset
+import datasets.samplers as samplers
+from torch.utils.data import DataLoader
+
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
-                    device: torch.device, epoch: int, max_norm: float = 0):
+                    device: torch.device, epoch: int, max_norm: float = 0, args=None):
     model.train()
     criterion.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -35,10 +38,31 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
 
+    dataset_train = build_dataset(image_set='train',seed=epoch,args=args)
+
+    if args.distributed:
+        if args.cache_mode:
+            sampler_train = samplers.NodeDistributedSampler(dataset_train)
+        else:
+            sampler_train = samplers.DistributedSampler(dataset_train)
+    else:
+        #sampler_train = torch.utils.data.RandomSampler(dataset_train)
+        sampler_train = torch.utils.data.SequentialSampler(dataset_train)
+
+    batch_sampler_train = torch.utils.data.BatchSampler(
+        sampler_train, args.batch_size, drop_last=True)
+
+    data_loader = DataLoader(dataset_train, batch_sampler=batch_sampler_train,
+                                   collate_fn=utils.collate_fn, num_workers=args.num_workers,
+                                   pin_memory=True)
+
     prefetcher = data_prefetcher(data_loader, device, prefetch=True)
     samples, targets = prefetcher.next()
-    for i in tqdm.tqdm(range(len(data_loader))):
-        #print(targets)
+
+
+    # for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
+    for idx, _ in enumerate(metric_logger.log_every(range(len(data_loader)), print_freq, header)):
+
         outputs = model(samples,targets)
         #print(targets)
         for j in range(len(targets)-1):
@@ -52,28 +76,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             targets[j]["labels"] = targets[-1]["labels"][targets[-1]["labels"]==temp]
         
         targets = targets[:-1]
-        #print(targets)
-        loss_dict = criterion(outputs,targets)
-        #import pdb
-        #pdb.set_trace()
-        samples, targets = prefetcher.next()
-        
-    print(len(data_loader))
-    losses=0
-    sys.exit(1)
-    """
-    # for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
-    for idx, _ in enumerate(metric_logger.log_every(range(len(data_loader)), print_freq, header)):
-        print(targets)
-        optimizer.step()
-        samples, targets = prefetcher.next()
-        
-        outputs = model(samples)
-        
-        
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
-        losses += sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
+        losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
 
         #reduce losses over all GPUs for logging purposes
         loss_dict_reduced = utils.reduce_dict(loss_dict)
@@ -85,35 +90,36 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         #loss_value = outputs['loss_classifier']+outputs['loss_box_reg']+outputs['loss_objectness']+outputs['loss_rpn_box_reg']
         loss_value = losses_reduced_scaled.item()
-        wandb.log({"losses" : loss_value})
+
+        if args.wandb:
+            wandb.log({"losses" : loss_value})
+
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
             print(loss_dict_reduced)
             sys.exit(1)
 
-        if (idx) % 4 ==0:
-            optimizer.zero_grad()
-            losses.backward()
-            if max_norm > 0:
-                grad_total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-            else:
-                grad_total_norm = utils.get_total_grad_norm(model.parameters(), max_norm)
-            optimizer.step()
-            metric_logger.update(loss=loss_value, **loss_dict_reduced_scaled, **loss_dict_reduced_unscaled)
-            metric_logger.update(class_error=loss_dict_reduced['class_error'])
-            metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-            metric_logger.update(grad_norm=grad_total_norm)
-            losses=0
+        
+        optimizer.zero_grad()
+        losses.backward()
+        if max_norm > 0:
+            grad_total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+        else:
+            grad_total_norm = utils.get_total_grad_norm(model.parameters(), max_norm)
+        optimizer.step()
+        metric_logger.update(loss=loss_value, **loss_dict_reduced_scaled, **loss_dict_reduced_unscaled)
+        metric_logger.update(class_error=loss_dict_reduced['class_error'])
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        metric_logger.update(grad_norm=grad_total_norm)
         samples, targets = prefetcher.next()
         #break
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-    """
 
 @torch.no_grad()
-def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, output_dir):
+def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, output_dir,args=None):
     model.eval()
     criterion.eval()
 
@@ -134,6 +140,25 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
             output_dir=os.path.join(output_dir, "panoptic_eval"),
         )
     #idx=0
+    dataset_val = build_dataset(image_set='val',seed=-1, args=args)
+
+    if args.distributed:
+        if args.cache_mode:
+
+            sampler_val = samplers.NodeDistributedSampler(dataset_val, shuffle=False)
+        else:
+
+            sampler_val = samplers.DistributedSampler(dataset_val, shuffle=False)
+    else:
+        #sampler_train = torch.utils.data.RandomSampler(dataset_train)
+
+        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+
+
+    data_loader = DataLoader(dataset_val, args.batch_size, sampler=sampler_val,
+                                 drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers,
+                                 pin_memory=True)
+
     for samples, targets in metric_logger.log_every(data_loader, 10, header):
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
@@ -152,16 +177,14 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
                              **loss_dict_reduced_scaled,
                              **loss_dict_reduced_unscaled)
         metric_logger.update(class_error=loss_dict_reduced['class_error'])
-        #print(outputs)
+
         orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
         results = postprocessors['bbox'](outputs, orig_target_sizes)
         if 'segm' in postprocessors.keys():
             target_sizes = torch.stack([t["size"] for t in targets], dim=0)
             results = postprocessors['segm'](results, outputs, orig_target_sizes, target_sizes)
         res = {target['image_id'].item(): output for target, output in zip(targets, results)}
-        #print(loss_dict_reduced)
-        #print(res)
-        #print(targets)
+
         if coco_evaluator is not None:
             coco_evaluator.update(res)
 
@@ -174,9 +197,7 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
                 res_pano[i]["file_name"] = file_name
 
             panoptic_evaluator.update(res_pano)
-        #idx+=1
-        #if idx>15:
-        #break
+
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
