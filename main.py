@@ -127,7 +127,7 @@ def get_args_parser():
     #add
     parser.add_argument('--wandb', action='store_true')
     parser.add_argument('--kshot', default=5, type=int)
-    parser.add_argument('--base_stage', default=True, type=bool)#base or fine
+    parser.add_argument('--train_mode', default='base_train', type=str)#base or fine
 
     return parser
 
@@ -157,8 +157,10 @@ def main(args):
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
 
-    dataset_train = build_dataset(image_set='train',seed=1,args=args)
-    dataset_val = build_dataset(image_set='val',seed=-1, args=args)
+    args.train_mode = 'base_train'
+    dataset_train = build_dataset(image_set='train',seed=args.seed,args=args)
+    args.train_mode = 'base_val'
+    dataset_val = build_dataset(image_set='val',seed=args.seed, args=args)
 
     if args.distributed:
         if args.cache_mode:
@@ -173,12 +175,12 @@ def main(args):
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
     batch_sampler_train = torch.utils.data.BatchSampler(
-        sampler_train, args.batch_size, drop_last=True)
+        sampler_train, 1, drop_last=True)
 
     data_loader_train = DataLoader(dataset_train, batch_sampler=batch_sampler_train,
                                    collate_fn=utils.collate_fn, num_workers=args.num_workers,
                                    pin_memory=True)
-    data_loader_val = DataLoader(dataset_val, args.batch_size, sampler=sampler_val,
+    data_loader_val = DataLoader(dataset_val, 1, sampler=sampler_val,
                                  drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers,
                                  pin_memory=True)
 

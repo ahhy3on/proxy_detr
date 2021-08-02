@@ -38,24 +38,6 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
 
-    dataset_train = build_dataset(image_set='train',seed=epoch,args=args)
-
-    if args.distributed:
-        if args.cache_mode:
-            sampler_train = samplers.NodeDistributedSampler(dataset_train)
-        else:
-            sampler_train = samplers.DistributedSampler(dataset_train)
-    else:
-        #sampler_train = torch.utils.data.RandomSampler(dataset_train)
-        sampler_train = torch.utils.data.SequentialSampler(dataset_train)
-
-    batch_sampler_train = torch.utils.data.BatchSampler(
-        sampler_train, args.batch_size, drop_last=True)
-
-    data_loader = DataLoader(dataset_train, batch_sampler=batch_sampler_train,
-                                   collate_fn=utils.collate_fn, num_workers=args.num_workers,
-                                   pin_memory=True)
-
     prefetcher = data_prefetcher(data_loader, device, prefetch=True)
     samples, targets = prefetcher.next()
 
@@ -140,30 +122,51 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
             output_dir=os.path.join(output_dir, "panoptic_eval"),
         )
     #idx=0
-    dataset_val = build_dataset(image_set='val',seed=-1, args=args)
-
-    if args.distributed:
-        if args.cache_mode:
-
-            sampler_val = samplers.NodeDistributedSampler(dataset_val, shuffle=False)
-        else:
-
-            sampler_val = samplers.DistributedSampler(dataset_val, shuffle=False)
-    else:
-        #sampler_train = torch.utils.data.RandomSampler(dataset_train)
-
-        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+    args.train_mode = 'base_val_code'
+    dataset_val = build_dataset(image_set='val',seed=args.seed, args=args)
+    sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
 
-    data_loader = DataLoader(dataset_val, args.batch_size, sampler=sampler_val,
+    data_loader_category_code = DataLoader(dataset_val, 1, sampler=sampler_val,
                                  drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers,
                                  pin_memory=True)
+    
+    category_code=[]
+    category_code_label = []
+
+    for samples, targets in tqdm(data_loader_category_code):
+        samples = samples.to(device)
+        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+        category_code_mean = model(samples,targets,extract_category_code_phase=True)
+        category_code.append(category_code_mean)
+        temp = targets[0]["labels"][0]
+        category_code_label.append(temp)
 
     for samples, targets in metric_logger.log_every(data_loader, 10, header):
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-        #tensors,_ =samples.decompose()
-        outputs = model(samples)
+        new_targets=[]
+        temp_category_code=[]
+
+        for label in torch.unique(targets[0]["labels"]):
+            
+            temp_category_code.append(category_code[category_code_label.index(label)])
+            temp = category_code_label.index(label)
+            temp_target={}
+            temp_target["size"]=targets[0]["size"]
+            temp_target["orig_size"]=targets[0]["orig_size"]
+            temp_target["iscrowd"]= targets[0]["iscrowd"][targets[0]["labels"]==temp]
+            temp_target["area"]=  targets[0]["area"][targets[0]["labels"]==temp]
+            temp_target["image_id"]= targets[0]["image_id"]
+            temp_target["boxes"] = targets[0]["boxes"][targets[0]["labels"]==temp]
+            temp_target["labels"] = targets[0]["labels"][targets[0]["labels"]==temp]
+            new_targets.append(temp_target)
+        
+        targets = new_targets
+        temp_category_code = torch.stack(temp_category_code)
+
+        outputs = model(samples,targets,predict_category=temp_category_code)
+        
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
         

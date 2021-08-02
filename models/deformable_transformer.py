@@ -126,7 +126,7 @@ class DeformableTransformer(nn.Module):
         valid_ratio = torch.stack([valid_ratio_w, valid_ratio_h], -1)
         return valid_ratio
 
-    def forward(self, srcs, masks, pos_embeds, query_embed=None,targets=None):
+    def forward(self, srcs, masks, pos_embeds, query_embed=None,targets=None,extract_category_code_phase=False,predict_category=None):
         assert self.two_stage or query_embed is not None
                 
         # prepare input for encoder
@@ -155,7 +155,17 @@ class DeformableTransformer(nn.Module):
         memory = self.encoder(src_flatten, spatial_shapes, level_start_index, valid_ratios, lvl_pos_embed_flatten, mask_flatten)
         #query is last
         bs = memory.shape[0]
-        category_code = self.CCE(memory[:-1],spatial_shapes,targets[:-1])
+
+        if extract_category_code_phase:
+            category_code = self.CCE(memory,spatial_shapes,targets)
+            return torch.mean(category_code,dim=0), None, None, None, None
+
+        elif predict_category is not None:
+            category_code = predict_category
+            bs = category_code.shape[0] + 1
+        else:
+            category_code = self.CCE(memory[:-1],spatial_shapes,targets[:-1])
+
         memory = memory[-1].unsqueeze(0)
         memory = memory.repeat( bs-1 ,1,1)
         valid_ratios=valid_ratios[-1].unsqueeze(0)

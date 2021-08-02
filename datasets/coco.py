@@ -49,24 +49,42 @@ class CocoDetection(TvCocoDetection):
         return img, target
 
 class CocoDetection_Fewshot(TvCocoDetection):
-    def __init__(self, img_folder, ann_file, transforms, seed, return_masks, cache_mode=False, local_rank=0, local_size=1, batch_size=1,kshot=1,base_stage=None):
+    def __init__(self, img_folder, ann_file, transforms, seed, return_masks, cache_mode=False, local_rank=0, local_size=1, batch_size=1,kshot=1,train_mode=None):
         super(CocoDetection_Fewshot, self).__init__(img_folder, ann_file,
                                             cache_mode=cache_mode, local_rank=local_rank, local_size=local_size)
         self.ann_file=ann_file
         self._transforms = transforms
         self.prepare = ConvertCocoPolysToMask(return_masks)
-        self.seed = seed
         self.novel_seed=0
         self.batch_size=batch_size
         self.coco_fewshot = None
-        if base_stage:#True -> base
-            if seed>0:#train, seed = epoch
-                self.kshot = 1000
-                self.generate_episodic_epoch()
-            
-            else:
-                self.kshot = 30
-                self.generate_episodic_epoch()
+        self.selected_shots = None
+
+        if train_mode =='base_train':
+            self.kshot = 200
+            self.seed = seed
+        elif train_mode == 'base_val_code':
+            self.seed = 0
+            self.kshot = 10
+            self.batch_size=10
+        elif train_mode == 'base_val':
+            self.seed = 0
+            self.kshot = 10
+            self.batch_size=1
+        elif train_mode == 'meta_train':
+            self.seed = seed
+            self.kshot = kshot
+        elif train_mode == 'meta_val_code':
+            self.seed = 0
+            self.kshot = kshot
+            self.batch_size = kshot
+        elif train_mode == 'meta_val':
+            self.seed = 0
+            self.kshot = kshot
+            self.batch_size=1
+        
+        self.train_mode = train_mode
+        
 
 
     def generate_episodic_epoch(self):
@@ -112,7 +130,6 @@ class CocoDetection_Fewshot(TvCocoDetection):
             for shots in [self.kshot]:
                 while True:
                     imgs = random.sample(list(img_ids.keys()), shots)
-                    
                     #print(len(imgs))
                     for img in imgs:
                         skip = False
@@ -149,75 +166,125 @@ class CocoDetection_Fewshot(TvCocoDetection):
                 'categories' : new_all_cats
             }
         #############################
+        self.selected_shots = selected_anno
 
         temp_images=[]
         temp_annos=[]
 
-        random.seed(self.seed)
-        available_ID = list(ID2CLASS.keys())
-        random.shuffle(available_ID)
-        for j in range(self.kshot):
-            for category_id in available_ID:
-                idx=random.randrange(self.kshot)
-                while idx == j:
-                    idx = random.randrange(self.kshot)
-
-                temp_annos.append(selected_anno[category_id]['annotations'][j])
-
-                remain_id = list(ID2CLASS.keys())
-                remain_id.remove(category_id)
-                remain_id_list = random.sample(remain_id,self.batch_size-2)
-                for remain_id_ in remain_id_list:
-                    temp_annos.append(selected_anno[remain_id_]['annotations'][idx])
-                temp_annos.append(selected_anno[category_id]['annotations'][idx])
-
         for k in list(ID2CLASS.keys()):
-            temp_images.extend(selected_anno[k]['images'])
+            if 'base' in self.train_mode:
+                if c not in PASCALCLASSID:
+                    temp_images.extend(selected_anno[k]['images'])
+                    temp_annos.extend(selected_anno[k]['annotations'])
+            else:
+                temp_images.extend(selected_anno[k]['images'])
+                temp_annos.extend(selected_anno[k]['annotations'])
 
-        print(len(temp_images))
-        print('annos ',len(temp_annos))
-        #sys.exit(1)
         current_set['images'] = temp_images
         current_set['annotations'] = temp_annos
-        anno_path='./data/coco/'+str(self.seed)+'.json'
+        anno_path='./data/coco/'+self.train_mode+'.json'
         
         with open(anno_path, 'w') as f:
             json.dump(current_set, f)
 
         self.coco_fewshot = COCO(anno_path)
-        self.ids = [a['id'] for a in temp_annos]
-        #random.seed(self.seed)
-        #random.shuffle(self.ids)
+        if self.train_mode =='base_train':
+            pass
+        elif self.train_mode == 'base_val_code':
+            self.ids = [a['id'] for a in temp_annos]
+
+        elif self.train_mode == 'base_val':
+            kshot_sample = [a['id'] for a in temp_annos]
+            self.ids = [t for t in self.ids if t not in kshot_sample]
+
+        elif self.train_mode == 'meta_train':
+            self.ids = [a['id'] for a in temp_annos]
+
+        elif self.train_mode == 'meta_val_code':
+            """
+            train의 k장으로 대체
+            """
+            self.ids = [a['id'] for a in temp_annos]
+        elif self.train_mode == 'meta_val':
+
+            kshot_sample = [a['id'] for a in temp_annos]
+            self.ids = [t for t in self.ids if t not in kshot_sample]
+        #self.ids = [a['id'] for a in temp_annos]
+
 
     def __getitem__(self, idx):#batch size = 10
         #print(idx)
-        if (idx%self.batch_size)==(self.batch_size-1):#query
-            coco = self.coco
-            ann_ids= self.ids[idx]
-            target_img_id = int(coco.loadAnns(ann_ids)[0]['image_id'])
-            ann_ids= coco.getAnnIds(imgIds=[target_img_id])
-            target = coco.loadAnns(ann_ids)
-            path = coco.loadImgs([target_img_id])[0]['file_name']
-            img = self.get_image(path)
-        else:#support
-            coco_fewshot = self.coco_fewshot
-            ann_ids= self.ids[idx]
-            target = coco_fewshot.loadAnns(ann_ids)
-            path = coco_fewshot.loadImgs([int(target[0]['image_id'])])[0]['file_name']
-            img = self.get_image(path)
-            #print(img.size)
-        image_id = int(target[0]['image_id'])
-        target = {'image_id': image_id, 'annotations': target}
+        imgs=[]
+        targets=[]
+        query_category = None
+        for i in range(self.batch_size):
 
-        img, target = self.prepare(img, target)
+            if 'val_code' in self.train_mode:
+                coco_fewshot = self.coco_fewshot
+                ann_ids= self.ids[idx]
+                target = coco_fewshot.loadAnns(ann_ids)
+                path = coco_fewshot.loadImgs([int(target[0]['image_id'])])[0]['file_name']
+                img = self.get_image(path)
 
-        if self._transforms is not None:
-            img, target = self._transforms(img, target)
-        if (idx%self.batch_size)==(self.batch_size-1):#query
-            target['query'] = torch.tensor(True)
-        else:#support
-            target['query'] = torch.tensor(False)
-        return img, target
+            elif 'val' in self.train_mode:
+                coco = self.coco
+                ann_ids= self.ids[idx]
+                target_img_id = int(coco.loadAnns(ann_ids)[0]['image_id'])
+                ann_ids= coco.getAnnIds(imgIds=[target_img_id])
+                target = coco.loadAnns(ann_ids)
+                path = coco.loadImgs([target_img_id])[0]['file_name']
+                img = self.get_image(path)
+                if i==1:
+                    break
+            else:
+                if i==0:
+                    coco = self.coco
+                    ann_ids= self.ids[idx]
+                    target_img_id = int(coco.loadAnns(ann_ids)[0]['image_id'])
+                    ann_ids= coco.getAnnIds(imgIds=[target_img_id])
+                    target = coco.loadAnns(ann_ids)
+                    path = coco.loadImgs([target_img_id])[0]['file_name']
+                    img = self.get_image(path)
+                elif i==1:#positive support
+                    coco_fewshot = self.coco_fewshot
+                    query_category = targets[0]['labels'][random.randint(len(targets[0]['labels']))]
+                    ann_ids = random.choice(self.selected_shots[query_category]['annotations'])['id']
+                    target = coco_fewshot.loadAnns(ann_ids)
+                    path = coco_fewshot.loadImgs([int(target[0]['image_id'])])[0]['file_name']
+                    img = self.get_image(path)
+                else:#random support
+                    available_ID = list(ID2CLASS.keys())
+                    available_ID.remove(query_category)
+                    available_ID = random.sample(available_ID,self.batch_size-2)
+
+                    coco_fewshot = self.coco_fewshot
+                    ann_ids= random.choice(self.selected_shots[available_ID[i-2]]['annotations'])['id']
+                    target = coco_fewshot.loadAnns(ann_ids)
+                    path = coco_fewshot.loadImgs([int(target[0]['image_id'])])[0]['file_name']
+                    img = self.get_image(path)
+
+            image_id = int(target[0]['image_id'])
+            target = {'image_id': image_id, 'annotations': target}
+
+            img, target = self.prepare(img, target)
+
+            if self._transforms is not None:
+                img, target = self._transforms(img, target)
+            if i==0:#query
+                target['query'] = torch.tensor(True)
+            else:#support
+                target['query'] = torch.tensor(False)
+            
+            imgs.append(img)
+            targets.append(target)
+
+        imgs = imgs.reverse()
+        targets = targets.reverse()
+        
+        imgs = torch.stack(imgs)
+        targets = torch.stack(targets)
+
+        return imgs, targets
 
 
 def convert_coco_poly_to_mask(segmentations, height, width):
@@ -352,5 +419,5 @@ def build(image_set,seed, args):
 
     img_folder, ann_file = PATHS[image_set]
     dataset = CocoDetection_Fewshot(img_folder, ann_file, transforms=make_coco_transforms(image_set), seed=seed,return_masks=args.masks,
-                            cache_mode=args.cache_mode, local_rank=get_local_rank(), local_size=get_local_size(), batch_size=args.batch_size, kshot=args.kshot, base_stage=args.base_stage)
+                            cache_mode=args.cache_mode, local_rank=get_local_rank(), local_size=get_local_size(), batch_size=args.batch_size, kshot=args.kshot, train_mode =args.train_mode)
     return dataset
