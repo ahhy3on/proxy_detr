@@ -59,14 +59,20 @@ class CocoDetection_Fewshot(TvCocoDetection):
         self.batch_size=batch_size
         self.coco_fewshot = None
         self.selected_shots = None
+        self.train_mode = train_mode
+        self.filter_no_annotation()
 
         if train_mode =='base_train':
             self.kshot = 150
             self.seed = seed
+            self.set_episode()
+
         elif train_mode == 'base_val_code':
             self.seed = 0
             self.kshot = 10
             self.batch_size=10
+            self.set_validation_support_set()
+
         elif train_mode == 'base_val_query':
             self.seed = 0
             self.kshot = 10
@@ -74,24 +80,24 @@ class CocoDetection_Fewshot(TvCocoDetection):
         elif train_mode == 'meta_train':
             self.seed = seed
             self.kshot = kshot
+            self.set_episode()
+
         elif train_mode == 'meta_val_code':
             self.seed = 0
             self.kshot = kshot
             self.batch_size = kshot
+            self.set_validation_support_set()
+
         elif train_mode == 'meta_val_query':
             self.seed = 0
             self.kshot = kshot
             self.batch_size=1
         
-        self.train_mode = train_mode
 
-        if 'val_query' not in self.train_mode:
-            self.set_episode()
-        else:
-            self.filter_no_annotation()
     
     def filter_no_annotation(self):
         image_list=[]
+        print("filter no annotation image like http://cocodataset.org/#explore?id=25593")
         for j in tqdm(self.ids):
             coco = self.coco
             img_id = j
@@ -102,6 +108,36 @@ class CocoDetection_Fewshot(TvCocoDetection):
                 continue
             image_list.append(j)
         self.ids = image_list
+
+    def set_validation_support_set(self):
+        #for caculation category code in validation
+
+        if 'base' in self.train_mode:
+            file_name = 'base_train'
+        elif 'meta' in self.train_mode:
+            file_name = 'meta_train'
+
+        file_exist = os.path.isfile('./data/coco/'+file_name+'.json')
+        if not file_exist:
+            print(self.train_mode+" file not exist")
+            self.generate_episode()
+        else:
+            print('already exist')
+            
+        data = json.load(open('./data/coco/'+file_name+'.json'))
+
+        available_ID = list(ID2CLASS.keys())
+
+        if 'base' in self.train_mode:
+            available_ID = [k for k in ID2CLASS.keys() if k not in PASCALCLASSID]
+
+        annotation_list=[]
+        for j in available_ID:
+            data[str(j)]['annotations'] = data[str(j)]['annotations'][:self.kshot]
+            data[str(j)]['images'] = data[str(j)]['images'][:self.kshot]
+            annotation_list.extend([d['id'] for d in data[str(j)]['annotations']])
+        
+        self.ids = annotation_list
 
     def set_episode(self):#train or val_code
         random.seed(self.seed)
@@ -117,22 +153,9 @@ class CocoDetection_Fewshot(TvCocoDetection):
             self.generate_episode()
         else:
             print('already exist')
-        data = json.load(open('./data/coco/'+file_name+'.json'))
+        
 
-        if 'val_code' in self.train_mode:
-            available_ID = list(ID2CLASS.keys())
-            if 'base' in self.train_mode:
-                available_ID = [k for k in ID2CLASS.keys() if k not in PASCALCLASSID]
-            annotation_list=[]
-            for j in available_ID:
-                data[str(j)]['annotations'] = data[str(j)]['annotations'][:self.kshot]
-                data[str(j)]['images'] = data[str(j)]['images'][:self.kshot]
-                annotation_list.extend([d['id'] for d in data[str(j)]['annotations']])
-            print(annotation_list)
-            self.ids = annotation_list
-            return
-        
-        
+        data = json.load(open('./data/coco/'+file_name+'.json'))
         annotation_list = []
         print("make batch data list")
         random.shuffle(self.ids)
@@ -261,17 +284,13 @@ class CocoDetection_Fewshot(TvCocoDetection):
                 target_img_id = int(coco.loadAnns(ann_ids)[0]['image_id'])
             ann_ids= coco.getAnnIds(imgIds=[target_img_id])
             target = coco.loadAnns(ann_ids)
-            #if 'base' in self.train_mode:
-            #    target = [t for t in target if t['category_id'] not in PASCALCLASSID]
             path = coco.loadImgs([target_img_id])[0]['file_name']
             img = self.get_image(path)
         else:#support
             target = coco.loadAnns(ann_ids)
             path = coco.loadImgs([int(target[0]['image_id'])])[0]['file_name']
             img = self.get_image(path)
-        if len(target)==0:
-            print(target)
-            print(self.ids[idx])
+
         image_id = int(target[0]['image_id'])
         target = {'image_id': image_id, 'annotations': target}
 

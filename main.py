@@ -232,7 +232,7 @@ def main(args):
             print('Missing Keys: {}'.format(missing_keys))
         if len(unexpected_keys) > 0:
             print('Unexpected Keys: {}'.format(unexpected_keys))
-        """
+        
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
             import copy
             p_groups = copy.deepcopy(optimizer.param_groups)
@@ -253,9 +253,9 @@ def main(args):
         # check the resumed model
         if not args.eval:
             test_stats, coco_evaluator = evaluate(
-                model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
+                model, criterion, postprocessors, device, args.output_dir, args
             )
-        """
+        
     
     if args.eval:
         test_stats, coco_evaluator = evaluate(model, criterion, postprocessors,
@@ -274,7 +274,7 @@ def main(args):
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             # extra checkpoint before LR drop and every 5 epochs
-            if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 5 == 0:
+            if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 1 == 0:
                 checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
             for checkpoint_path in checkpoint_paths:
                 utils.save_on_master({
@@ -297,23 +297,23 @@ def main(args):
 
         for k, v in test_stats.items():
             if k=='class_error':
-                log_data['test_class_error'] = v
+                log_data['val_class_error'] = v
             if k=='loss':
-                log_data['test_loss'] = v
+                log_data['val_loss'] = v
             if k=='coco_eval_bbox':
-                log_data['test_AP_IoU = 0.50 : 0.95__all_maxDets=100'] = v[0]
-                log_data['test_AP_IoU = 0.50__all_maxDets=100'] = v[1]
-                log_data['test_AP_IoU = 0.75__all_maxDets=100'] = v[2]
-                log_data['test_AP_IoU = 0.50 : 0.95__small_maxDets=100'] = v[3]
-                log_data['test_AP_IoU = 0.50 : 0.95__medium_maxDets=100'] = v[4]
-                log_data['test_AP_IoU = 0.50 : 0.95__large_maxDets=100'] = v[5]
+                log_data['val_AP_IoU = 0.50 : 0.95__all_maxDets=100'] = v[0]
+                log_data['val_AP_IoU = 0.50__all_maxDets=100'] = v[1]
+                log_data['val_AP_IoU = 0.75__all_maxDets=100'] = v[2]
+                log_data['val_AP_IoU = 0.50 : 0.95__small_maxDets=100'] = v[3]
+                log_data['val_AP_IoU = 0.50 : 0.95__medium_maxDets=100'] = v[4]
+                log_data['val_AP_IoU = 0.50 : 0.95__large_maxDets=100'] = v[5]
 
-                log_data['test_AR_IoU = 0.50 : 0.95__all_maxDets=1'] =v[6]
-                log_data['test_AR_IoU = 0.50 : 0.95__all_maxDets=10'] =v[7]
-                log_data['test_AR_IoU = 0.50 : 0.95__all_maxDets=100'] =v[8]
-                log_data['test_AR_IoU = 0.50 : 0.95__small_maxDets=100'] =v[9]
-                log_data['test_AR_IoU = 0.50 : 0.95__medium_maxDets=100'] =v[10]
-                log_data['test_AR_IoU = 0.50 : 0.95__large_maxDets=100'] =v[11]
+                log_data['val_AR_IoU = 0.50 : 0.95__all_maxDets=1'] =v[6]
+                log_data['val_AR_IoU = 0.50 : 0.95__all_maxDets=10'] =v[7]
+                log_data['val_AR_IoU = 0.50 : 0.95__all_maxDets=100'] =v[8]
+                log_data['val_AR_IoU = 0.50 : 0.95__small_maxDets=100'] =v[9]
+                log_data['val_AR_IoU = 0.50 : 0.95__medium_maxDets=100'] =v[10]
+                log_data['val_AR_IoU = 0.50 : 0.95__large_maxDets=100'] =v[11]
 
         #print(log_data)
         if args.wandb:
