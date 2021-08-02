@@ -212,8 +212,8 @@ def main(args):
         coco_val = datasets.coco.build("val", args)
         base_ds = get_coco_api_from_dataset(coco_val)
     else:
-        base_ds = get_coco_api_from_dataset(dataset_val)
-
+        #base_ds = get_coco_api_from_dataset(dataset_val)
+        pass
     if args.frozen_weights is not None:
         checkpoint = torch.load(args.frozen_weights, map_location='cpu')
         model_without_ddp.detr.load_state_dict(checkpoint['model'])
@@ -286,7 +286,7 @@ def main(args):
                 }, checkpoint_path)
 
         test_stats,coco_evaluator = evaluate(
-            model, criterion, postprocessors, base_ds, device, args.output_dir,args
+            model, criterion, postprocessors, device, args.output_dir,args
         )
         log_data = {}
         for k, v in train_stats.items():

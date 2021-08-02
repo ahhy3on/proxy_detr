@@ -21,7 +21,7 @@ from pycocotools.coco import COCO
 from .torchvision_datasets import CocoDetection as TvCocoDetection
 from util.misc import get_local_rank, get_local_size
 import datasets.transforms as T
-import tqdm
+from tqdm import tqdm
 import random
 import json
 import os
@@ -87,6 +87,21 @@ class CocoDetection_Fewshot(TvCocoDetection):
 
         if 'val_query' not in self.train_mode:
             self.set_episode()
+        else:
+            self.filter_no_annotation()
+    
+    def filter_no_annotation(self):
+        image_list=[]
+        for j in tqdm(self.ids):
+            coco = self.coco
+            img_id = j
+            ann_ids = coco.getAnnIds(imgIds=[img_id])
+
+            annos = coco.loadAnns(ann_ids)
+            if len(annos)==0:
+                continue
+            image_list.append(j)
+        self.ids = image_list
 
     def set_episode(self):#train or val_code
         random.seed(self.seed)
@@ -100,17 +115,20 @@ class CocoDetection_Fewshot(TvCocoDetection):
         if not file_exist:
             print(self.train_mode+" file not exist")
             self.generate_episode()
-
+        else:
+            print('already exist')
         data = json.load(open('./data/coco/'+file_name+'.json'))
 
         if 'val_code' in self.train_mode:
             available_ID = list(ID2CLASS.keys())
+            if 'base' in self.train_mode:
+                available_ID = [k for k in ID2CLASS.keys() if k not in PASCALCLASSID]
             annotation_list=[]
             for j in available_ID:
-                data[j]['annotations'] = data[j]['annotations'][:self.kshot]
-                data[j]['images'] = data[j]['images'][:self.kshot]
-                annotation_list.extend(data[j]['annotations'])
-            
+                data[str(j)]['annotations'] = data[str(j)]['annotations'][:self.kshot]
+                data[str(j)]['images'] = data[str(j)]['images'][:self.kshot]
+                annotation_list.extend([d['id'] for d in data[str(j)]['annotations']])
+            print(annotation_list)
             self.ids = annotation_list
             return
         
@@ -118,24 +136,35 @@ class CocoDetection_Fewshot(TvCocoDetection):
         annotation_list = []
         print("make batch data list")
         random.shuffle(self.ids)
-        for j in tqdm(range(self.ids)):
+        print('prev',len(self.ids))
+        for j in tqdm(self.ids):
             coco = self.coco
-
-            target = coco.loadAnns(j)
-            positive_sample_category_id = target[0]['category_id']# positive support
-            sample_idx = random.randrange(self.kshot)
+            img_id = j
+            ann_ids = coco.getAnnIds(imgIds=[img_id])
+            annos = coco.loadAnns(ann_ids)
+            if 'base' in self.train_mode:
+                annos = [anno for anno in annos if int(anno['category_id']) not in PASCALCLASSID]
+            if len(annos)==0:
+                continue
+            selected_annotation = random.choice(annos)
+            positive_sample_category_id = selected_annotation['category_id']# positive support
             
-            annotation_list.append(data[positive_sample_category_id]['annotations'][sample_idx] )
+            sample_idx = random.randrange(self.kshot)
+            annotation_list.append(data[str(positive_sample_category_id)]['annotations'][sample_idx]['id'] )
 
-            remain_id = list(ID2CLASS.keys())
+            if 'base' in self.train_mode:
+                remain_id = [k for k in ID2CLASS.keys() if k not in PASCALCLASSID]
+            else:
+                remain_id = list(ID2CLASS.keys())
             remain_id.remove(positive_sample_category_id)
             remain_id_list = random.sample(remain_id,self.batch_size-2)
-
-            for remain_id_ in remain_id_list:#suuport
-                annotation_list.append(data[remain_id_]['annotations'][sample_idx])
             
-            annotation_list.append(j)# query
-
+            for remain_id_ in remain_id_list:#suuport
+                annotation_list.append(data[str(remain_id_)]['annotations'][sample_idx]['id'])
+            
+            annotation_list.append(selected_annotation['id'])# query
+        
+        print('after',len(annotation_list)/6)
         self.ids = annotation_list
 
     def generate_episode(self):
@@ -226,16 +255,23 @@ class CocoDetection_Fewshot(TvCocoDetection):
         ann_ids= self.ids[idx]
 
         if ((idx%self.batch_size)==(self.batch_size-1) or 'val_query' in self.train_mode) and 'val_code' not in self.train_mode:#query
-            target_img_id = int(coco.loadAnns(ann_ids)[0]['image_id'])
+            if 'val_query' in self.train_mode:
+                target_img_id = ann_ids
+            else:
+                target_img_id = int(coco.loadAnns(ann_ids)[0]['image_id'])
             ann_ids= coco.getAnnIds(imgIds=[target_img_id])
             target = coco.loadAnns(ann_ids)
+            #if 'base' in self.train_mode:
+            #    target = [t for t in target if t['category_id'] not in PASCALCLASSID]
             path = coco.loadImgs([target_img_id])[0]['file_name']
             img = self.get_image(path)
         else:#support
             target = coco.loadAnns(ann_ids)
             path = coco.loadImgs([int(target[0]['image_id'])])[0]['file_name']
             img = self.get_image(path)
-            
+        if len(target)==0:
+            print(target)
+            print(self.ids[idx])
         image_id = int(target[0]['image_id'])
         target = {'image_id': image_id, 'annotations': target}
 

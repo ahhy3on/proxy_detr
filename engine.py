@@ -14,7 +14,7 @@ import math
 import os
 import sys
 from typing import Iterable
-import tqdm
+from tqdm import tqdm
 
 import torch
 import util.misc as utils
@@ -25,6 +25,7 @@ import wandb
 from datasets import build_dataset, get_coco_api_from_dataset
 import datasets.samplers as samplers
 from torch.utils.data import DataLoader
+from datasets.dataset_cfg import PASCALCLASS,ID2CLASS,CLASS2ID,PASCALCLASSID
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     optimizer: torch.optim.Optimizer,
@@ -38,7 +39,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
 
-    args.train_mode = 'base_train'
+    args.train_mode = 'meta_train'
     dataset_train = build_dataset(image_set='train',seed=epoch,args=args)
 
     if args.distributed:
@@ -114,14 +115,14 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(grad_norm=grad_total_norm)
         samples, targets = prefetcher.next()
-        #break
+        
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
-def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, output_dir,args=None):
+def evaluate(model, criterion, postprocessors, device, output_dir,args=None):
     model.eval()
     criterion.eval()
 
@@ -131,7 +132,7 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
 
     iou_types = tuple(k for k in ('segm', 'bbox') if k in postprocessors.keys())
     #print(iou_types)
-    coco_evaluator = CocoEvaluator(base_ds, iou_types)
+    #coco_evaluator = CocoEvaluator(base_ds, iou_types)
     #coco_evaluator.coco_eval[iou_types[0]].params.iouThrs = [0, 0.1, 0.5, 0.75]
 
     panoptic_evaluator = None
@@ -142,15 +143,15 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
             output_dir=os.path.join(output_dir, "panoptic_eval"),
         )
     #idx=0
-    args.train_mode = 'base_val_code'
-    dataset_val_code = build_dataset(image_set='val',seed= 0 , args=args)
+    args.train_mode = 'meta_val_code'
+    dataset_val_code = build_dataset(image_set='train',seed= 0 , args=args)
     sampler_val = torch.utils.data.SequentialSampler(dataset_val_code)
 
     data_loader_category_code = DataLoader(dataset_val_code, 10, sampler=sampler_val,
                                  drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers,
                                  pin_memory=True)
 
-    args.train_mode = 'base_val'
+    args.train_mode = 'meta_val_query'
     dataset_val_query = build_dataset(image_set='val',seed=0, args=args)
 
     if args.distributed:
@@ -165,27 +166,32 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
                                  drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers,
                                  pin_memory=True)
     
-    category_code=[]
-    category_code_label = []
+    base_ds = get_coco_api_from_dataset(dataset_val_query)
+
+    coco_evaluator = CocoEvaluator(base_ds, iou_types)
+    #coco_evaluator.coco_eval[iou_types[0]].params.iouThrs = [0, 0.1, 0.5, 0.75]
+    category_code={}
 
     for samples, targets in tqdm(data_loader_category_code):
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
         category_code_mean = model(samples,targets,extract_category_code_phase=True)
-        category_code.append(category_code_mean)
-        temp = targets[0]["labels"][0]
-        category_code_label.append(temp)
+        temp = int(targets[0]["labels"][0])
+        category_code[temp]=(category_code_mean)
 
     for samples, targets in metric_logger.log_every(data_loader_val, 10, header):
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
         new_targets=[]
         temp_category_code=[]
-
-        for label in torch.unique(targets[0]["labels"]):
+        
+        support_list = torch.unique(targets[0]['labels'])
+        support_list = [ids for ids in support_list if int(ids) not in PASCALCLASSID]
+        for label in support_list:
             
-            temp_category_code.append(category_code[category_code_label.index(label)])
-            temp = category_code_label.index(label)
+            temp_category_code.append(category_code[int(label)])
+            temp = int(label)
+
             temp_target={}
             temp_target["size"]=targets[0]["size"]
             temp_target["orig_size"]=targets[0]["orig_size"]
@@ -196,6 +202,8 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
             temp_target["labels"] = targets[0]["labels"][targets[0]["labels"]==temp]
             new_targets.append(temp_target)
         
+        if len(temp_category_code)==0:
+            continue
         targets = new_targets
         temp_category_code = torch.stack(temp_category_code)
 
