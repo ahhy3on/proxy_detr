@@ -105,9 +105,14 @@ class CocoDetection_Fewshot(TvCocoDetection):
 
         if 'val_code' in self.train_mode:
             available_ID = list(ID2CLASS.keys())
+            annotation_list=[]
             for j in available_ID:
                 data[j]['annotations'] = data[j]['annotations'][:self.kshot]
                 data[j]['images'] = data[j]['images'][:self.kshot]
+                annotation_list.extend(data[j]['annotations'])
+            
+            self.ids = annotation_list
+            return
         
         
         annotation_list = []
