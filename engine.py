@@ -27,7 +27,7 @@ import datasets.samplers as samplers
 from torch.utils.data import DataLoader
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
-                    data_loader: Iterable, optimizer: torch.optim.Optimizer,
+                    optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, max_norm: float = 0, args=None):
     model.train()
     criterion.train()
@@ -37,6 +37,27 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     metric_logger.add_meter('grad_norm', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
+
+    args.train_mode = 'base_train'
+    dataset_train = build_dataset(image_set='train',seed=epoch,args=args)
+
+    if args.distributed:
+        if args.cache_mode:
+            sampler_train = samplers.NodeDistributedSampler(dataset_train)
+        else:
+            sampler_train = samplers.DistributedSampler(dataset_train)
+    else:
+        sampler_train = torch.utils.data.SequentialSampler(dataset_train)
+
+    batch_sampler_train = torch.utils.data.BatchSampler(
+        sampler_train, args.batch_size , drop_last=True)
+
+    if args.distributed:
+        sampler_train.set_epoch(epoch)
+
+    data_loader = DataLoader(dataset_train, batch_sampler=batch_sampler_train,
+                                   collate_fn=utils.collate_fn, num_workers=args.num_workers,
+                                   pin_memory=True)
 
     prefetcher = data_prefetcher(data_loader, device, prefetch=True)
     samples, targets = prefetcher.next()
@@ -81,7 +102,6 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             print(loss_dict_reduced)
             sys.exit(1)
 
-        
         optimizer.zero_grad()
         losses.backward()
         if max_norm > 0:
@@ -123,11 +143,25 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
         )
     #idx=0
     args.train_mode = 'base_val_code'
-    dataset_val = build_dataset(image_set='val',seed=args.seed, args=args)
-    sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+    dataset_val_code = build_dataset(image_set='val',seed= 0 , args=args)
+    sampler_val = torch.utils.data.SequentialSampler(dataset_val_code)
 
+    data_loader_category_code = DataLoader(dataset_val_code, 10, sampler=sampler_val,
+                                 drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers,
+                                 pin_memory=True)
 
-    data_loader_category_code = DataLoader(dataset_val, 1, sampler=sampler_val,
+    args.train_mode = 'base_val'
+    dataset_val_query = build_dataset(image_set='val',seed=0, args=args)
+
+    if args.distributed:
+        if args.cache_mode:
+            sampler_val = samplers.NodeDistributedSampler(dataset_val_query, shuffle=False)
+        else:
+            sampler_val = samplers.DistributedSampler(dataset_val_query, shuffle=False)
+    else:
+        sampler_val = torch.utils.data.SequentialSampler(dataset_val_query)
+
+    data_loader_val = DataLoader(dataset_val_query, 1, sampler=sampler_val,
                                  drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers,
                                  pin_memory=True)
     
@@ -142,7 +176,7 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
         temp = targets[0]["labels"][0]
         category_code_label.append(temp)
 
-    for samples, targets in metric_logger.log_every(data_loader, 10, header):
+    for samples, targets in metric_logger.log_every(data_loader_val, 10, header):
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
         new_targets=[]
