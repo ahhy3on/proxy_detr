@@ -25,7 +25,7 @@ import wandb
 from datasets import build_dataset, get_coco_api_from_dataset
 import datasets.samplers as samplers
 from torch.utils.data import DataLoader
-from datasets.dataset_cfg import PASCALCLASS,ID2CLASS,CLASS2ID,PASCALCLASSID
+from datasets.dataset_cfg import PASCALCLASS,ID2CLASS,CLASS2ID,PASCALCLASSID,PASCALCLASS_BASEID,PASCALCLASS_NOVELID
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     optimizer: torch.optim.Optimizer,
@@ -39,7 +39,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
 
-    args.train_mode = 'meta_train'
+    args.train_mode = 'base_train'
     dataset_train = build_dataset(image_set='train',seed=epoch,args=args)
 
     if args.distributed:
@@ -115,7 +115,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(grad_norm=grad_total_norm)
         samples, targets = prefetcher.next()
-        
+        #break
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
@@ -143,7 +143,7 @@ def evaluate(model, criterion, postprocessors, device, output_dir,args=None):
             output_dir=os.path.join(output_dir, "panoptic_eval"),
         )
     #idx=0
-    args.train_mode = 'meta_val_code'
+    args.train_mode = 'base_val_code'
     dataset_val_code = build_dataset(image_set='train',seed= 0 , args=args)
     sampler_val = torch.utils.data.SequentialSampler(dataset_val_code)
 
@@ -151,7 +151,7 @@ def evaluate(model, criterion, postprocessors, device, output_dir,args=None):
                                  drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers,
                                  pin_memory=True)
 
-    args.train_mode = 'meta_val_query'
+    args.train_mode = 'base_val_query'
     dataset_val_query = build_dataset(image_set='val',seed=0, args=args)
 
     if args.distributed:
@@ -179,14 +179,15 @@ def evaluate(model, criterion, postprocessors, device, output_dir,args=None):
         temp = int(targets[0]["labels"][0])
         category_code[temp]=(category_code_mean)
 
-    for samples, targets in metric_logger.log_every(data_loader_val, 10, header):
+    for samples, targets in metric_logger.log_every(data_loader_val,10, header):
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
         new_targets=[]
         temp_category_code=[]
         
         support_list = torch.unique(targets[0]['labels'])
-        support_list = [ids for ids in support_list if int(ids) not in PASCALCLASSID]
+        support_list = [ids for ids in support_list if int(ids) in PASCALCLASS_BASEID]
+        #print(targets)
         for label in support_list:
             
             temp_category_code.append(category_code[int(label)])

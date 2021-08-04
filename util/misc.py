@@ -67,7 +67,7 @@ class SmoothedValue(object):
     def __init__(self, window_size=20, fmt=None):
         if fmt is None:
             fmt = "{median:.4f} ({global_avg:.4f})"
-        self.deque = deque(maxlen=window_size)
+        self.deque = deque([0],maxlen=window_size)
         self.total = 0.0
         self.count = 0
         self.fmt = fmt
@@ -102,6 +102,8 @@ class SmoothedValue(object):
 
     @property
     def global_avg(self):
+        if self.count==0:
+            return 0
         return self.total / self.count
 
     @property
@@ -259,8 +261,8 @@ class MetricLogger(object):
             data_time.update(time.time() - end)
             yield obj
             iter_time.update(time.time() - end)
-            if i % print_freq == 0 or i == len(iterable) - 1:
-                eta_seconds = iter_time.global_avg * (len(iterable) - i)
+            if i%print_freq==0 or i==len(iterable)-1:
+                eta_seconds = iter_time.global_avg * (len(iterable)-1)
                 eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
                 if torch.cuda.is_available():
                     print(log_msg.format(

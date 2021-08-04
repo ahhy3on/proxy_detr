@@ -29,12 +29,11 @@ PASCALCLASS_NOVEL = [
     "couch", #sofa
 ]
 
-
-PASCALCLASS = {i : PASCALCLASS[i] for i in range(len(PASCALCLASS))}
-PASCALCLASS_NOVEL = {k: v for k, v in PASCALCLASS.items() if v not in PASCALCLASS_NOVEL}
-PASCALCLASSID = [k for k,v in PASCALCLASS]
-PASCALCLASS_NOVELID = [k for k,v in PASCALCLASS_NOVEL]
-PASCALCLASS_BASEID = [k for k,v in PASCALCLASS if k not in PASCALCLASS_NOVELID]
+PASCALCLASS = {int(i+1) : PASCALCLASS[i] for i in range(len(PASCALCLASS))}
+PASCALCLASS_NOVEL = {int(k): v for k, v in PASCALCLASS.items() if v in PASCALCLASS_NOVEL}
+PASCALCLASSID = [int(k) for k in PASCALCLASS.keys()]
+PASCALCLASS_NOVELID = [int(k) for k in PASCALCLASS_NOVEL.keys()]
+PASCALCLASS_BASEID = [int(k) for k in PASCALCLASS.keys() if k not in PASCALCLASS_NOVELID]
 
 
 ID2CLASS = {

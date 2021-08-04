@@ -136,7 +136,7 @@ def main(args):
     utils.init_distributed_mode(args)
     print("git:\n  {}\n".format(utils.get_sha()))
     if args.wandb:
-        wandb.init(project='deformable_detr_skt_box')
+        wandb.init(project='meta_detr_coco')
     if args.frozen_weights is not None:
         assert args.masks, "Frozen training is meant for segmentation only"
     print(args)

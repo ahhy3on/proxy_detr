@@ -71,8 +71,6 @@ def get_coco_annotation_from_obj(obj, label2id):
     label = obj.findtext('name').lower()
     assert label in label2id, f"Error: {label} is not in label2id !"
     category_id = label2id[label]
-    if category_id==20:
-        print('20')
     bndbox = obj.find('bndbox')
     xmin = int(float(bndbox.findtext('xmin'))) -1
     ymin = int(float(bndbox.findtext('ymin'))) -1
@@ -108,8 +106,8 @@ def convert_xmls_to_cocojson(annotation_paths: List[str],
     for i, a_path in tqdm(enumerate(annotation_paths)):
         #a_path = './data/VOCdevkit/VOC2012/Annotations/'+a_path+'.xml'
         # Read annotation xml
-        i_path = a_path.replace('xmls','images')
-        i_path = i_path.replace('xml','png')
+        i_path = a_path.replace('Annotations','JPEGImages')
+        i_path = i_path.replace('xml','jpg')
         #a_path.split('/')
         #i_path[2]='images'
         #i_path[-1]=i_path[-1].split('.')[0]+'.png'
@@ -130,8 +128,8 @@ def convert_xmls_to_cocojson(annotation_paths: List[str],
             bnd_id = bnd_id + 1
 
     for label, label_id in label2id.items():
-        if label_id==20:
-            print('20')
+        #if label_id==20:
+        ##   print('20')
         category_info = {'supercategory': 'none', 'id': label_id, 'name': label}
         output_json_dict['categories'].append(category_info)
 

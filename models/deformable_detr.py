@@ -457,7 +457,7 @@ class MLP(nn.Module):
 
 
 def build(args):
-    num_classes = 91 if args.dataset_file != 'coco' else 91
+    num_classes = 21 if args.dataset_file != 'coco' else 21
     if args.dataset_file == 'voc':
         num_classes = 21
     if args.dataset_file == "coco_panoptic":
