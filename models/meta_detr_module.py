@@ -2,6 +2,7 @@ import torch
 import torchvision
 import torch.nn as nn
 import torch.nn.functional as F
+from util.box_ops import box_cxcywh_to_xyxy
 
 class Aggregator(nn.Module):
     """Some Information about Aggregator"""
@@ -12,7 +13,7 @@ class Aggregator(nn.Module):
         self.category_specific_features_fc = nn.Linear(d_model*3,d_model)
 
     def forward(self, category_codes, query_features):
-        print(query_features.shape, category_codes.shape)
+        #print(query_features.shape, category_codes.shape)
         subtraction = F.relu(self.subtraction_fc(query_features-category_codes))
         multiplication = F.relu(self.multiplication_fc(query_features * category_codes))
         concat_feature = torch.cat((subtraction,multiplication,query_features),dim=-1)
@@ -36,7 +37,7 @@ class CCE(nn.Module):
         bbox=[]
         #print(support_anno)
         for anno in support_anno:
-            bbox.append(anno['boxes'])
+            bbox.append(box_cxcywh_to_xyxy(anno['boxes']))
         #print(bbox)
         for idx, (H_, W_) in enumerate(spatial_shapes):
             #[batch,length,dim] -> [batch, dim, H,W]

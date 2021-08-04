@@ -21,13 +21,13 @@ from pycocotools.coco import COCO
 from .torchvision_datasets import CocoDetection as TvCocoDetection
 from util.misc import get_local_rank, get_local_size
 import datasets.transforms as T
-from tqdm import tqdm
+from tqdm import tqdmxz
 import random
 import json
 import os
 import sys
 import copy
-from datasets.dataset_cfg import PASCALCLASS,ID2CLASS,CLASS2ID,PASCALCLASSID
+from datasets.dataset_cfg import PASCALCLASS,ID2CLASS,CLASS2ID,PASCALCLASSID,PASCALCLASS_BASEID,PASCALCLASS_NOVELID
 
 
 class CocoDetection(TvCocoDetection):
@@ -117,19 +117,19 @@ class CocoDetection_Fewshot(TvCocoDetection):
         elif 'meta' in self.train_mode:
             file_name = 'meta_train'
 
-        file_exist = os.path.isfile('./data/coco/'+file_name+'.json')
+        file_exist = os.path.isfile('./data/VOCdevkit/'+file_name+'.json')
         if not file_exist:
             print(self.train_mode+" file not exist")
             self.generate_episode()
         else:
             print('already exist')
             
-        data = json.load(open('./data/coco/'+file_name+'.json'))
+        data = json.load(open('./data/VOCdevkit/'+file_name+'.json'))
 
-        available_ID = list(ID2CLASS.keys())
+        available_ID = PASCALCLASSID
 
         if 'base' in self.train_mode:
-            available_ID = [k for k in ID2CLASS.keys() if k not in PASCALCLASSID]
+            available_ID = [k for k in available_ID if k in PASCALCLASS_BASEID]
 
         annotation_list=[]
         for j in available_ID:
@@ -147,7 +147,7 @@ class CocoDetection_Fewshot(TvCocoDetection):
         elif 'meta' in self.train_mode:
             file_name = 'meta_train'
 
-        file_exist = os.path.isfile('./data/coco/'+file_name+'.json')
+        file_exist = os.path.isfile('./data/VOCdevkit/'+file_name+'.json')
         if not file_exist:
             print(self.train_mode+" file not exist")
             self.generate_episode()
@@ -155,7 +155,7 @@ class CocoDetection_Fewshot(TvCocoDetection):
             print('already exist')
         
 
-        data = json.load(open('./data/coco/'+file_name+'.json'))
+        data = json.load(open('./data/VOCdevkit/'+file_name+'.json'))
         annotation_list = []
         print("make batch data list")
         random.shuffle(self.ids)
@@ -166,7 +166,7 @@ class CocoDetection_Fewshot(TvCocoDetection):
             ann_ids = coco.getAnnIds(imgIds=[img_id])
             annos = coco.loadAnns(ann_ids)
             if 'base' in self.train_mode:
-                annos = [anno for anno in annos if int(anno['category_id']) not in PASCALCLASSID]
+                annos = [anno for anno in annos if int(anno['category_id']) in PASCALCLASS_BASEID]
             if len(annos)==0:
                 continue
             selected_annotation = random.choice(annos)
@@ -176,9 +176,9 @@ class CocoDetection_Fewshot(TvCocoDetection):
             annotation_list.append(data[str(positive_sample_category_id)]['annotations'][sample_idx]['id'] )
 
             if 'base' in self.train_mode:
-                remain_id = [k for k in ID2CLASS.keys() if k not in PASCALCLASSID]
+                remain_id = PASCALCLASS_BASEID
             else:
-                remain_id = list(ID2CLASS.keys())
+                remain_id = PASCALCLASSID
             remain_id.remove(positive_sample_category_id)
             remain_id_list = random.sample(remain_id,self.batch_size-2)
             
@@ -204,7 +204,7 @@ class CocoDetection_Fewshot(TvCocoDetection):
         for i in data['images']:
             id2img[i['id']] = i
 
-        anno = {i: [] for i in ID2CLASS.keys()}
+        anno = {i: [] for i in PASCALCLASSID}
         for a in data['annotations']:
             if a['iscrowd'] == 1:
                 continue
@@ -212,10 +212,10 @@ class CocoDetection_Fewshot(TvCocoDetection):
 
         k_shot_annotation_list = {}
 
-        category = ID2CLASS.keys()
+        category = PASCALCLASS
 
         for c in tqdm(category):
-            if c in PASCALCLASSID:
+            if c in PASCALCLASS_BASEID:
                 random.seed(self.novel_seed)
                 if 'base' in self.train_mode:
                     continue
@@ -267,7 +267,7 @@ class CocoDetection_Fewshot(TvCocoDetection):
             #print(c, new_data)
             k_shot_annotation_list[c] = new_data
 
-        k_shot_annotation_file='./data/coco/'+self.train_mode+'.json'
+        k_shot_annotation_file='./data/VOCdevkit/'+self.train_mode+'.json'
 
         with open(k_shot_annotation_file, 'w') as f:
             json.dump(k_shot_annotation_list, f)
@@ -289,6 +289,9 @@ class CocoDetection_Fewshot(TvCocoDetection):
         else:#support
             target = coco.loadAnns(ann_ids)
             path = coco.loadImgs([int(target[0]['image_id'])])[0]['file_name']
+            print(path)
+            import sys
+            sys.exit(0)
             img = self.get_image(path)
 
         image_id = int(target[0]['image_id'])
@@ -430,10 +433,10 @@ def build(image_set,seed, args):
     PATHS = {
             #"train" : (root / "cmes_new/images", root / "train_box.json"),
             #"val" : (root/"cmes_new/images", root / "val_box.json"),
-        #"train": (root / "VOCdevkit/VOC2012/JPEGImages", root / 'VOCdevkit/VOC2012/JPEGImages/train.json'),
-        #"val": (root / "VOCdevkit/VOC2012/JPEGImages", root / 'VOCdevkit/VOC2012/JPEGImages/val.json'),
-        "train" : (root / "coco/train2017", root/"coco/annotations"/f'{mode}_train2017.json'),
-        "val" : (root/ "coco/val2017", root/"coco/annotations"/f'{mode}_val2017.json'),
+        "train": (root / "VOCdevkit/VOC2012/JPEGImages", root / 'VOCdevkit/trainset_voc.json'),
+        "val": (root / "VOCdevkit/VOC2012/JPEGImages", root / 'VOCdevkit/valset_voc.json'),
+        #"train" : (root / "coco/train2017", root/"coco/annotations"/f'{mode}_train2017.json'),
+        #"val" : (root/ "coco/val2017", root/"coco/annotations"/f'{mode}_val2017.json'),
     }
 
     img_folder, ann_file = PATHS[image_set]

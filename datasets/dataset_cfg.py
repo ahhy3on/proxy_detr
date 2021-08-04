@@ -21,6 +21,22 @@ PASCALCLASS = [
     "tv", #tv/monitor
 ]
 
+PASCALCLASS_NOVEL = [
+    "bird",
+    "cow",
+    "bus",
+    "motorcycle", #motorbike
+    "couch", #sofa
+]
+
+
+PASCALCLASS = {i : PASCALCLASS[i] for i in range(len(PASCALCLASS))}
+PASCALCLASS_NOVEL = {k: v for k, v in PASCALCLASS.items() if v not in PASCALCLASS_NOVEL}
+PASCALCLASSID = [k for k,v in PASCALCLASS]
+PASCALCLASS_NOVELID = [k for k,v in PASCALCLASS_NOVEL]
+PASCALCLASS_BASEID = [k for k,v in PASCALCLASS if k not in PASCALCLASS_NOVELID]
+
+
 ID2CLASS = {
         1: "person",
         2: "bicycle",
@@ -105,5 +121,4 @@ ID2CLASS = {
     }
 
 CLASS2ID = {v: k for k, v in ID2CLASS.items()}
-
-PASCALCLASSID = [CLASS2ID[obj] for obj in PASCALCLASS]
+#PASCALCLASSID = [CLASS2ID[obj] for obj in PASCALCLASS]
