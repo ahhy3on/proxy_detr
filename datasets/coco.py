@@ -61,7 +61,7 @@ class CocoDetection_Fewshot(TvCocoDetection):
         self.selected_shots = None
         self.train_mode = train_mode
         self.filter_no_annotation()
-
+        self.idx = 0
         if train_mode =='base_train':
             self.kshot = 150
             self.seed = seed
@@ -134,10 +134,12 @@ class CocoDetection_Fewshot(TvCocoDetection):
     def __getitem__(self, idx):
 
         coco = self.coco
-        ann_ids= self.ids[idx]
+        #ann_ids= self.ids[idx]
 
         if 'train' in self.train_mode:
-            if (idx%self.batch_size)==(self.batch_size-1): #query
+            ann_ids = idx
+            if idx<0: #query
+                ann_ids = int(-1*ann_ids)
                 target_img_id = int(coco.loadAnns(ann_ids)[0]['image_id'])
                 ann_ids= coco.getAnnIds(imgIds=[target_img_id])
                 target = coco.loadAnns(ann_ids)
@@ -149,6 +151,7 @@ class CocoDetection_Fewshot(TvCocoDetection):
                 img = self.get_image(path)
 
         elif 'val_query' in self.train_mode:
+            ann_ids = self.ids[idx]
             target_img_id = ann_ids
             ann_ids= coco.getAnnIds(imgIds=[target_img_id])
             target = coco.loadAnns(ann_ids)
@@ -156,6 +159,7 @@ class CocoDetection_Fewshot(TvCocoDetection):
             img = self.get_image(path)
 
         elif 'val_code' in self.train_mode:
+            ann_ids = self.ids[idx]
             target = coco.loadAnns(ann_ids)
             path = coco.loadImgs([int(target[0]['image_id'])])[0]['file_name']
             img = self.get_image(path)
@@ -169,10 +173,11 @@ class CocoDetection_Fewshot(TvCocoDetection):
             img, target = self._transforms(img, target)
         
         if 'train' in self.train_mode:
-            if (idx%self.batch_size)==(self.batch_size-1): #query
+            if idx<0: #query
                 target['query'] = torch.tensor(True)
             else:
                 target['query'] = torch.tensor(False)
+
         elif 'val_query' in self.train_mode:
             target['query'] = torch.tensor(True)
         elif 'val_code' in self.train_mode:

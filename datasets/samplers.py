@@ -39,6 +39,7 @@ class EpisodicSampler(Sampler):
         self.num_samples = int(math.ceil(len(self.dataset)))
         self.shuffle = shuffle
         self.train_mode ='base_train'
+        self.batch_size=6
         if 'base' in self.train_mode:
             file_name = 'base_train'
             self.kshot = 150
@@ -70,7 +71,7 @@ class EpisodicSampler(Sampler):
             indices = torch.arange(len(self.dataset)).tolist()
 
         for idx in indices:
-            result = self.sample_batch(idx)
+            result = self.sample_batch(self.ids[idx])
             if result is None:
                 continue
             else:
@@ -106,16 +107,16 @@ class EpisodicSampler(Sampler):
         batch.append(self.data[str(positive_sample_category_id)]['annotations'][sample_idx]['id'] )
 
         if 'base' in self.train_mode:
-            remain_id = PASCALCLASS_BASEID
+            remain_id = [i for i in  PASCALCLASS_BASEID]
         else:
-            remain_id = PASCALCLASSID
+            remain_id = [i for i in PASCALCLASSID]
         remain_id.remove(positive_sample_category_id)
         remain_id_list = random.sample(remain_id,self.batch_size-2)
         
         for remain_id_ in remain_id_list:#suuport
             batch.append(self.data[str(remain_id_)]['annotations'][sample_idx]['id'])
         
-        batch.append(selected_annotation['id'])# query
+        batch.append(-1*selected_annotation['id'])# query
         
         return batch
 

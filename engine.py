@@ -66,7 +66,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
     # for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
     for idx, _ in enumerate(metric_logger.log_every(range(len(data_loader)), print_freq, header)):
-
+        print(targets)
         outputs = model(samples,targets)
         #print(targets)
         for j in range(len(targets)-1):
@@ -115,7 +115,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(grad_norm=grad_total_norm)
         samples, targets = prefetcher.next()
-        #break
+        break
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
