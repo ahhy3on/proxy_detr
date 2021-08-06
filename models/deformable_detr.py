@@ -424,8 +424,8 @@ class PostProcess(nn.Module):
         prob = out_logits.sigmoid()
         topk_values, topk_indexes = torch.topk(prob.view(out_logits.shape[0], -1), 100, dim=1)
         scores = topk_values
+
         #print(topk_indexes)
-        #print(scores)
         topk_boxes = topk_indexes // out_logits.shape[2]
         labels = topk_indexes % out_logits.shape[2]
         boxes = box_ops.box_cxcywh_to_xyxy(out_bbox)
@@ -435,7 +435,12 @@ class PostProcess(nn.Module):
         img_h, img_w = target_sizes.unbind(1)
         scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=1)
         boxes = boxes * scale_fct[:, None, :]
-
+        scores = scores.reshape(1,-1)
+        labels = labels.reshape(1,-1)
+        boxes = boxes.reshape(1,-1,4)
+        #print(labels.shape)
+        #print(boxes.shape)
+        #print(scores.shape)
         results = [{'scores': s, 'labels': l, 'boxes': b} for s, l, b in zip(scores, labels, boxes)]
 
         return results

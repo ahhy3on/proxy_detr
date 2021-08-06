@@ -224,8 +224,16 @@ def evaluate(model, criterion, postprocessors, device, output_dir,args=None):
                              **loss_dict_reduced_unscaled)
         metric_logger.update(class_error=loss_dict_reduced['class_error'])
 
+        #orig_target_sizes = torch.stack([targets[0]["orig_size"]], dim=0)
         orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
+        #outputs['pred_logits']=outputs['pred_logits'].reshape(1,-1,21)
+        #outputs['pred_boxes']=outputs['pred_boxes'].reshape(1,-1,4)
+        #print(outputs['pred_logits'].shape)
+        #print(orig_target_sizes)
+        #import sys
+        #sys.exit(1)
         results = postprocessors['bbox'](outputs, orig_target_sizes)
+        #sys.exit(1)
         if 'segm' in postprocessors.keys():
             target_sizes = torch.stack([t["size"] for t in targets], dim=0)
             results = postprocessors['segm'](results, outputs, orig_target_sizes, target_sizes)

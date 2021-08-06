@@ -136,7 +136,7 @@ def main(args):
     utils.init_distributed_mode(args)
     print("git:\n  {}\n".format(utils.get_sha()))
     if args.wandb:
-        wandb.init(project='meta_detr_coco')
+        wandb.init(project='meta_detr_voc')
     if args.frozen_weights is not None:
         assert args.masks, "Frozen training is meant for segmentation only"
     print(args)
@@ -225,7 +225,7 @@ def main(args):
                 args.resume, map_location='cpu', check_hash=True)
         else:
             checkpoint = torch.load(args.resume, map_location='cpu')
-        pretrained_dict = {k: v for k, v in checkpoint['model'].items() if "class_embed" not in k}
+        pretrained_dict = {k: v for k, v in checkpoint['model'].items()}
         missing_keys, unexpected_keys = model_without_ddp.load_state_dict(pretrained_dict, strict=False)
         unexpected_keys = [k for k in unexpected_keys if not (k.endswith('total_params') or k.endswith('total_ops'))]
         if len(missing_keys) > 0:
@@ -259,7 +259,7 @@ def main(args):
     
     if args.eval:
         test_stats, coco_evaluator = evaluate(model, criterion, postprocessors,
-                                             base_ds, device, args.output_dir)
+                                              device, args.output_dir,args)
         if args.output_dir:
             utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
         return
