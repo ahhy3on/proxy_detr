@@ -65,7 +65,6 @@ class CocoDetection_Fewshot(TvCocoDetection):
         if train_mode =='base_train':
             self.kshot = 150
             self.seed = seed
-            self.set_episode()
 
         elif train_mode == 'base_val_code':
             self.seed = 0
@@ -80,7 +79,6 @@ class CocoDetection_Fewshot(TvCocoDetection):
         elif train_mode == 'meta_train':
             self.seed = seed
             self.kshot = kshot
-            self.set_episode()
 
         elif train_mode == 'meta_val_code':
             self.seed = 0
@@ -93,8 +91,6 @@ class CocoDetection_Fewshot(TvCocoDetection):
             self.kshot = kshot
             self.batch_size=1
         
-
-    
     def filter_no_annotation(self):
         image_list=[]
         print("filter no annotation image like http://cocodataset.org/#explore?id=25593")
@@ -119,11 +115,7 @@ class CocoDetection_Fewshot(TvCocoDetection):
 
         file_exist = os.path.isfile('./data/VOCdevkit/'+file_name+'.json')
         if not file_exist:
-            print(self.train_mode+" file not exist")
-            self.generate_episode()
-        else:
-            print('already exist')
-            
+            generate_episode(self.ann_file,self.train_mode,self.kshot)
         data = json.load(open('./data/VOCdevkit/'+file_name+'.json'))
 
         available_ID = PASCALCLASSID
@@ -139,67 +131,73 @@ class CocoDetection_Fewshot(TvCocoDetection):
         
         self.ids = annotation_list
 
-    def set_episode(self):#train or val_code
-        random.seed(self.seed)
-        data = None
-        if 'base' in self.train_mode:
-            file_name = 'base_train'
-        elif 'meta' in self.train_mode:
-            file_name = 'meta_train'
+    def __getitem__(self, idx):
 
-        file_exist = os.path.isfile('./data/VOCdevkit/'+file_name+'.json')
-        if not file_exist:
-            print(self.train_mode+" file not exist")
-            self.generate_episode()
-        else:
-            print('already exist')
-        
-        print('base',PASCALCLASS_BASEID)
-        data = json.load(open('./data/VOCdevkit/'+file_name+'.json'))
-        annotation_list = []
-        print("make batch data list")
-        random.shuffle(self.ids)
-        print('prev',len(self.ids))
-        for j in tqdm(self.ids):
-            coco = self.coco
-            img_id = j
-            ann_ids = coco.getAnnIds(imgIds=[img_id])
-            annos = coco.loadAnns(ann_ids)
-            #print(annos)
-            if 'base' in self.train_mode:
-                annos = [anno for anno in annos if anno['category_id'] in PASCALCLASS_BASEID]
-            if len(annos)==0:
-                continue
-            #print(annos)
-            selected_annotation = random.choice(annos)
-            positive_sample_category_id = selected_annotation['category_id']# positive support
-            #print(data.keys())
-            #import sys
-            #sys.exit(1)
-            #print(data[str(positive_sample_category_id)])
-            sample_idx = random.randrange(self.kshot)
-            annotation_list.append(data[str(positive_sample_category_id)]['annotations'][sample_idx]['id'] )
+        coco = self.coco
+        ann_ids= self.ids[idx]
 
-            if 'base' in self.train_mode:
-                remain_id = [i for i in PASCALCLASS_BASEID]
+        if 'train' in self.train_mode:
+            if (idx%self.batch_size)==(self.batch_size-1): #query
+                target_img_id = int(coco.loadAnns(ann_ids)[0]['image_id'])
+                ann_ids= coco.getAnnIds(imgIds=[target_img_id])
+                target = coco.loadAnns(ann_ids)
+                path = coco.loadImgs([target_img_id])[0]['file_name']
+                img = self.get_image(path)
             else:
-                remain_id = [i for i in PASCALCLASSID]
-            remain_id.remove(positive_sample_category_id)
-            #print('remain',remain_id)
-            remain_id_list = random.sample(remain_id,self.batch_size-2)
-            
-            for remain_id_ in remain_id_list:#suuport
-                annotation_list.append(data[str(remain_id_)]['annotations'][sample_idx]['id'])
-            
-            annotation_list.append(selected_annotation['id'])# query
-        
-        print('after',len(annotation_list)/6)
-        self.ids = annotation_list
+                target = coco.loadAnns(ann_ids) #support
+                path = coco.loadImgs([int(target[0]['image_id'])])[0]['file_name']
+                img = self.get_image(path)
 
-    def generate_episode(self):
-        random.seed(self.seed)
+        elif 'val_query' in self.train_mode:
+            target_img_id = ann_ids
+            ann_ids= coco.getAnnIds(imgIds=[target_img_id])
+            target = coco.loadAnns(ann_ids)
+            path = coco.loadImgs([target_img_id])[0]['file_name']
+            img = self.get_image(path)
+
+        elif 'val_code' in self.train_mode:
+            target = coco.loadAnns(ann_ids)
+            path = coco.loadImgs([int(target[0]['image_id'])])[0]['file_name']
+            img = self.get_image(path)
+
+        image_id = int(target[0]['image_id'])
+        target = {'image_id': image_id, 'annotations': target}
+
+        img, target = self.prepare(img, target)
+
+        if self._transforms is not None:
+            img, target = self._transforms(img, target)
+        
+        if 'train' in self.train_mode:
+            if (idx%self.batch_size)==(self.batch_size-1): #query
+                target['query'] = torch.tensor(True)
+            else:
+                target['query'] = torch.tensor(False)
+        elif 'val_query' in self.train_mode:
+            target['query'] = torch.tensor(True)
+        elif 'val_code' in self.train_mode:
+            target['query'] = torch.tensor(False)
+
+        return img, target
+
+def convert_coco_poly_to_mask(segmentations, height, width):
+    masks = []
+    for polygons in segmentations:
+        rles = coco_mask.frPyObjects(polygons, height, width)
+        mask = coco_mask.decode(rles)
+        if len(mask.shape) < 3:
+            mask = mask[..., None]
+        mask = torch.as_tensor(mask, dtype=torch.uint8)
+        mask = mask.any(dim=2)
+        masks.append(mask)
+    if masks:
+        masks = torch.stack(masks, dim=0)
+    else:
+        masks = torch.zeros((0, height, width), dtype=torch.uint8)
+    return masks
+
+def generate_episode(data_path,train_mode,kshot):
         ############################
-        data_path = self.ann_file
         data = json.load(open(data_path))
 
         new_all_cats = []
@@ -211,7 +209,6 @@ class CocoDetection_Fewshot(TvCocoDetection):
             id2img[i['id']] = i
 
         anno = {i: [] for i in PASCALCLASSID}
-        print(anno)
         for a in data['annotations']:
             if a['iscrowd'] == 1:
                 continue
@@ -222,13 +219,9 @@ class CocoDetection_Fewshot(TvCocoDetection):
         category = PASCALCLASS
 
         for c in tqdm(category):
-            if c not in PASCALCLASS_BASEID:
-                random.seed(self.novel_seed)
-                if 'base' in self.train_mode:
+            if c in PASCALCLASS_BASEID:
+                if 'base' in train_mode:
                     continue
-
-            else:
-                random.seed(self.seed)
 
             img_ids = {}
             for a in anno[c]:
@@ -240,7 +233,7 @@ class CocoDetection_Fewshot(TvCocoDetection):
             sample_shots = []
             sample_imgs = []
 
-            for shots in [self.kshot]:
+            for shots in [kshot]:
                 while True:
                     imgs = random.sample(list(img_ids.keys()), shots)
                     
@@ -274,63 +267,10 @@ class CocoDetection_Fewshot(TvCocoDetection):
             #print(c, new_data)
             k_shot_annotation_list[c] = new_data
 
-        k_shot_annotation_file='./data/VOCdevkit/'+self.train_mode+'.json'
+        k_shot_annotation_file='./data/VOCdevkit/'+train_mode+'.json'
 
         with open(k_shot_annotation_file, 'w') as f:
             json.dump(k_shot_annotation_list, f)
-
-    def __getitem__(self, idx):
-
-        coco = self.coco
-        ann_ids= self.ids[idx]
-
-        if ((idx%self.batch_size)==(self.batch_size-1) or 'val_query' in self.train_mode) and 'val_code' not in self.train_mode:#query
-            if 'val_query' in self.train_mode:
-                target_img_id = ann_ids
-            else:
-                target_img_id = int(coco.loadAnns(ann_ids)[0]['image_id'])
-            ann_ids= coco.getAnnIds(imgIds=[target_img_id])
-            target = coco.loadAnns(ann_ids)
-            path = coco.loadImgs([target_img_id])[0]['file_name']
-            img = self.get_image(path)
-        else:#support
-            target = coco.loadAnns(ann_ids)
-            path = coco.loadImgs([int(target[0]['image_id'])])[0]['file_name']
-            #print(path)
-            #import sys
-            #sys.exit(0)
-            img = self.get_image(path)
-
-        image_id = int(target[0]['image_id'])
-        target = {'image_id': image_id, 'annotations': target}
-
-        img, target = self.prepare(img, target)
-
-        if self._transforms is not None:
-            img, target = self._transforms(img, target)
-        
-        if ((idx%self.batch_size)==(self.batch_size-1) or 'val_query' in self.train_mode) and 'val_code' not in self.train_mode:#query
-            target['query'] = torch.tensor(True)
-        else:#support
-            target['query'] = torch.tensor(False)
-
-        return img, target
-
-def convert_coco_poly_to_mask(segmentations, height, width):
-    masks = []
-    for polygons in segmentations:
-        rles = coco_mask.frPyObjects(polygons, height, width)
-        mask = coco_mask.decode(rles)
-        if len(mask.shape) < 3:
-            mask = mask[..., None]
-        mask = torch.as_tensor(mask, dtype=torch.uint8)
-        mask = mask.any(dim=2)
-        masks.append(mask)
-    if masks:
-        masks = torch.stack(masks, dim=0)
-    else:
-        masks = torch.zeros((0, height, width), dtype=torch.uint8)
-    return masks
 
 
 class ConvertCocoPolysToMask(object):

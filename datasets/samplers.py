@@ -11,7 +11,119 @@ import math
 import torch
 import torch.distributed as dist
 from torch.utils.data.sampler import Sampler
+import json
+import random
+from datasets.dataset_cfg import PASCALCLASS,ID2CLASS,CLASS2ID,PASCALCLASSID,PASCALCLASS_BASEID,PASCALCLASS_NOVELID
+from tqdm import tqdm
+from datasets.coco import generate_episode
 
+class EpisodicSampler(Sampler):
+    """Sampler that restricts data loading to a subset of the dataset.
+    It is especially useful in conjunction with
+    :class:`torch.nn.parallel.DistributedDataParallel`. In such case, each
+    process can pass a DistributedSampler instance as a DataLoader sampler,
+    and load a subset of the original dataset that is exclusive to it.
+    .. note::
+        Dataset is assumed to be of constant size.
+    only use Train
+    Arguments:
+        dataset: Dataset used for sampling.
+        num_replicas (optional): Number of processes participating in
+            distributed training.
+        rank (optional): Rank of the current process within num_replicas.
+    """
+
+    def __init__(self, dataset, shuffle=True):
+        self.dataset = dataset
+        self.epoch = 0
+        self.num_samples = int(math.ceil(len(self.dataset)))
+        self.shuffle = shuffle
+        self.train_mode ='base_train'
+        if 'base' in self.train_mode:
+            file_name = 'base_train'
+            self.kshot = 150
+        elif 'meta' in self.train_mode:
+            file_name = 'meta_train'
+            self.kshot = 10
+
+        file_exist = os.path.isfile('./data/VOCdevkit/'+file_name+'.json')
+        if not file_exist:
+            print(self.train_mode+" file not exist")
+            generate_episode('./data/VOCdevkit/trainset_voc.json',self.train_mode,self.kshot)
+        else:
+            print('already exist')
+            
+        self.data = json.load(open('./data/VOCdevkit/'+file_name+'.json'))
+
+        from pycocotools.coco import COCO
+        self.coco = COCO('./data/VOCdevkit/trainset_voc.json')
+        self.ids = list(sorted(self.coco.imgs.keys()))
+        self.filter_no_annotation()
+
+    def __iter__(self):
+        if self.shuffle:
+            # deterministically shuffle based on epoch
+            g = torch.Generator()
+            g.manual_seed(self.epoch)
+            indices = torch.randperm(len(self.dataset), generator=g).tolist()
+        else:
+            indices = torch.arange(len(self.dataset)).tolist()
+
+        for idx in indices:
+            result = self.sample_batch(idx)
+            if result is None:
+                continue
+            else:
+                yield result
+    
+    def filter_no_annotation(self):
+        image_list=[]
+        print("filter no annotation image like http://cocodataset.org/#explore?id=25593")
+        for j in tqdm(self.ids):
+            coco = self.coco
+            img_id = j
+            ann_ids = coco.getAnnIds(imgIds=[img_id])
+
+            annos = coco.loadAnns(ann_ids)
+            if len(annos)==0:
+                continue
+            image_list.append(j)
+        self.ids = image_list
+
+    def sample_batch(self,idx):
+        batch = []
+        coco = self.coco
+        ann_ids = coco.getAnnIds(imgIds=[idx])
+        annos = coco.loadAnns(ann_ids)
+        if 'base' in self.train_mode:
+            annos = [anno for anno in annos if int(anno['category_id']) in PASCALCLASS_BASEID]
+        if len(annos)==0:
+            return None
+        selected_annotation = random.choice(annos)
+        positive_sample_category_id = selected_annotation['category_id']# positive support
+        
+        sample_idx = random.randrange(self.kshot)
+        batch.append(self.data[str(positive_sample_category_id)]['annotations'][sample_idx]['id'] )
+
+        if 'base' in self.train_mode:
+            remain_id = PASCALCLASS_BASEID
+        else:
+            remain_id = PASCALCLASSID
+        remain_id.remove(positive_sample_category_id)
+        remain_id_list = random.sample(remain_id,self.batch_size-2)
+        
+        for remain_id_ in remain_id_list:#suuport
+            batch.append(self.data[str(remain_id_)]['annotations'][sample_idx]['id'])
+        
+        batch.append(selected_annotation['id'])# query
+        
+        return batch
+
+    def __len__(self):
+        return self.num_samples
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
 
 class DistributedSampler(Sampler):
     """Sampler that restricts data loading to a subset of the dataset.

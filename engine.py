@@ -48,7 +48,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         else:
             sampler_train = samplers.DistributedSampler(dataset_train)
     else:
-        sampler_train = torch.utils.data.SequentialSampler(dataset_train)
+        sampler_train = samplers.EpisodicSampler(dataset_train)
 
     batch_sampler_train = torch.utils.data.BatchSampler(
         sampler_train, args.batch_size , drop_last=True)
@@ -56,7 +56,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     if args.distributed:
         sampler_train.set_epoch(epoch)
 
-    data_loader = DataLoader(dataset_train, batch_sampler=batch_sampler_train,
+    data_loader = DataLoader(dataset_train, batch_sampler=sampler_train,
                                    collate_fn=utils.collate_fn, num_workers=args.num_workers,
                                    pin_memory=True)
 
