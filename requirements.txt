@@ -1,0 +1,5 @@
+pycocotools
+tqdm
+cython
+scipy
+pytorch_metric_learning

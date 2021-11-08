@@ -26,6 +26,7 @@ from datasets import build_dataset, get_coco_api_from_dataset
 import datasets.samplers as samplers
 from torch.utils.data import DataLoader
 from datasets.dataset_cfg import PASCALCLASS,ID2CLASS,CLASS2ID,PASCALCLASSID,PASCALCLASS_BASEID,PASCALCLASS_NOVELID
+from losses import *
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     optimizer: torch.optim.Optimizer,
@@ -57,8 +58,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         sampler_train.set_epoch(epoch)
 
     data_loader = DataLoader(dataset_train, batch_sampler=sampler_train,
-                                   collate_fn=utils.collate_fn, num_workers=args.num_workers,
-                                   pin_memory=True)
+                            collate_fn=utils.collate_fn, num_workers=args.num_workers,
+                            pin_memory=True)
 
     prefetcher = data_prefetcher(data_loader, device, prefetch=True)
     samples, targets = prefetcher.next()
@@ -66,7 +67,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
     # for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
     for idx, _ in enumerate(metric_logger.log_every(range(len(data_loader)), print_freq, header)):
-        print(targets)
+        #print(targets)
+        print(f"samples::{samples.tensors.shape}")
+        print(f"targets::{len(targets)}")
         outputs = model(samples,targets)
         #print(targets)
         for j in range(len(targets)-1):
@@ -87,7 +90,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         #reduce losses over all GPUs for logging purposes
         loss_dict_reduced = utils.reduce_dict(loss_dict)
         loss_dict_reduced_unscaled = {f'{k}_unscaled': v
-                                      for k, v in loss_dict_reduced.items()}
+                                    for k, v in loss_dict_reduced.items()}
         loss_dict_reduced_scaled = {k: v * weight_dict[k]
                                     for k, v in loss_dict_reduced.items() if k in weight_dict}
         losses_reduced_scaled = sum(loss_dict_reduced_scaled.values())
@@ -115,7 +118,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(grad_norm=grad_total_norm)
         samples, targets = prefetcher.next()
-        break
+        
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
@@ -148,8 +151,8 @@ def evaluate(model, criterion, postprocessors, device, output_dir,args=None):
     sampler_val = torch.utils.data.SequentialSampler(dataset_val_code)
 
     data_loader_category_code = DataLoader(dataset_val_code, 10, sampler=sampler_val,
-                                 drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers,
-                                 pin_memory=True)
+                                drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers,
+                                pin_memory=True)
 
     args.train_mode = 'base_val_query'
     dataset_val_query = build_dataset(image_set='val',seed=0, args=args)
@@ -163,8 +166,8 @@ def evaluate(model, criterion, postprocessors, device, output_dir,args=None):
         sampler_val = torch.utils.data.SequentialSampler(dataset_val_query)
 
     data_loader_val = DataLoader(dataset_val_query, 1, sampler=sampler_val,
-                                 drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers,
-                                 pin_memory=True)
+                                drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers,
+                                pin_memory=True)
     
     base_ds = get_coco_api_from_dataset(dataset_val_query)
 
@@ -218,7 +221,7 @@ def evaluate(model, criterion, postprocessors, device, output_dir,args=None):
         loss_dict_reduced_scaled = {k: v * weight_dict[k]
                                     for k, v in loss_dict_reduced.items() if k in weight_dict}
         loss_dict_reduced_unscaled = {f'{k}_unscaled': v
-                                      for k, v in loss_dict_reduced.items()}
+                                    for k, v in loss_dict_reduced.items()}
         metric_logger.update(loss=sum(loss_dict_reduced_scaled.values()),
                              **loss_dict_reduced_scaled,
                              **loss_dict_reduced_unscaled)

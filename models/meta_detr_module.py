@@ -50,5 +50,4 @@ class CCE(nn.Module):
             #[K,dim]
             feature_code.append(F.sigmoid(self.gap(aligned_support_bbox).squeeze()))
             #print(feature_code.shape)
-       
         return torch.mean(torch.stack(feature_code,dim=-1),dim=-1).squeeze()

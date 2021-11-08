@@ -22,10 +22,10 @@ from models.meta_detr_module import CCE, Aggregator
 
 class DeformableTransformer(nn.Module):
     def __init__(self, d_model=256, nhead=8,
-                 num_encoder_layers=6, num_decoder_layers=6, dim_feedforward=1024, dropout=0.1,
-                 activation="relu", return_intermediate_dec=False,
-                 num_feature_levels=4, dec_n_points=4,  enc_n_points=4,
-                 two_stage=False, two_stage_num_proposals=300):
+                num_encoder_layers=6, num_decoder_layers=6, dim_feedforward=1024, dropout=0.1,
+                activation="relu", return_intermediate_dec=False,
+                num_feature_levels=4, dec_n_points=4,  enc_n_points=4,
+                two_stage=False, two_stage_num_proposals=300):
         super().__init__()
 
         self.d_model = d_model
@@ -34,13 +34,13 @@ class DeformableTransformer(nn.Module):
         self.two_stage_num_proposals = two_stage_num_proposals
 
         encoder_layer = DeformableTransformerEncoderLayer(d_model, dim_feedforward,
-                                                          dropout, activation,
-                                                          num_feature_levels, nhead, enc_n_points)
+                                                        dropout, activation,
+                                                        num_feature_levels, nhead, enc_n_points)
         self.encoder = DeformableTransformerEncoder(encoder_layer, num_encoder_layers)
 
         decoder_layer = DeformableTransformerDecoderLayer(d_model, dim_feedforward,
-                                                          dropout, activation,
-                                                          num_feature_levels, nhead, dec_n_points)
+                                                        dropout, activation,
+                                                        num_feature_levels, nhead, dec_n_points)
         self.decoder = DeformableTransformerDecoder(decoder_layer, num_decoder_layers, return_intermediate_dec)
 
         self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, d_model))
@@ -152,8 +152,13 @@ class DeformableTransformer(nn.Module):
         level_start_index = torch.cat((spatial_shapes.new_zeros((1, )), spatial_shapes.prod(1).cumsum(0)[:-1]))
         valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
 
+
+        # memory : support set & query features
         memory = self.encoder(src_flatten, spatial_shapes, level_start_index, valid_ratios, lvl_pos_embed_flatten, mask_flatten)
-        #query is last
+        
+        print(f"memory:{memory.shape}")
+        #query is the last
+
         bs = memory.shape[0]
 
         if extract_category_code_phase:
@@ -211,9 +216,9 @@ class DeformableTransformer(nn.Module):
 
 class DeformableTransformerEncoderLayer(nn.Module):
     def __init__(self,
-                 d_model=256, d_ffn=1024,
-                 dropout=0.1, activation="relu",
-                 n_levels=4, n_heads=8, n_points=4):
+                d_model=256, d_ffn=1024,
+                dropout=0.1, activation="relu",
+                n_levels=4, n_heads=8, n_points=4):
         super().__init__()
 
         # self attention
@@ -263,7 +268,7 @@ class DeformableTransformerEncoder(nn.Module):
         for lvl, (H_, W_) in enumerate(spatial_shapes):
 
             ref_y, ref_x = torch.meshgrid(torch.linspace(0.5, H_ - 0.5, H_, dtype=torch.float32, device=device),
-                                          torch.linspace(0.5, W_ - 0.5, W_, dtype=torch.float32, device=device))
+                                        torch.linspace(0.5, W_ - 0.5, W_, dtype=torch.float32, device=device))
             ref_y = ref_y.reshape(-1)[None] / (valid_ratios[:, None, lvl, 1] * H_)
             ref_x = ref_x.reshape(-1)[None] / (valid_ratios[:, None, lvl, 0] * W_)
             ref = torch.stack((ref_x, ref_y), -1)
@@ -291,8 +296,8 @@ class DeformableTransformerEncoder(nn.Module):
 
 class DeformableTransformerDecoderLayer(nn.Module):
     def __init__(self, d_model=256, d_ffn=1024,
-                 dropout=0.1, activation="relu",
-                 n_levels=4, n_heads=8, n_points=4):
+                dropout=0.1, activation="relu",
+                n_levels=4, n_heads=8, n_points=4):
         super().__init__()
 
         # cross attention
@@ -334,7 +339,7 @@ class DeformableTransformerDecoderLayer(nn.Module):
         tgt = self.norm2(tgt)
         tgt2 = self.cross_attn(self.with_pos_embed(tgt, query_pos),
                             reference_points,
-                               src, src_spatial_shapes, level_start_index, src_padding_mask)
+                            src, src_spatial_shapes, level_start_index, src_padding_mask)
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
 

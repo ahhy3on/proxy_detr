@@ -26,6 +26,16 @@ from engine import evaluate, train_one_epoch
 from models import build_model
 import torchvision
 import wandb
+
+import losses
+
+#set seed
+seed = 1
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed_all(seed) # set random seed for all gpus
+
 #from warmup_scheduler import GradualWarmupScheduler
 def get_args_parser():
     parser = argparse.ArgumentParser('Deformable DETR Detector', add_help=False)
@@ -128,13 +138,21 @@ def get_args_parser():
     parser.add_argument('--wandb', action='store_true')
     parser.add_argument('--kshot', default=5, type=int)
     parser.add_argument('--train_mode', default='base_train', type=str)#base or fine
-
+    parser.add_argument('--alpha', default = 32, type = float,
+        help = 'Scaling Parameter setting'
+    )
+    parser.add_argument('--mrg', default = 0.1, type = float,
+        help = 'Margin parameter setting'
+    )
     return parser
 
 
 def main(args):
+
     utils.init_distributed_mode(args)
+    
     print("git:\n  {}\n".format(utils.get_sha()))
+    
     if args.wandb:
         wandb.init(project='meta_detr_voc')
     if args.frozen_weights is not None:
@@ -148,8 +166,26 @@ def main(args):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-
+    
+    nb_classes = 90
+    
     model, criterion, postprocessors = build_model(args)
+    #criterion = losses.Proxy_Anchor(nb_classes = nb_classes, sz_embed = args.hidden_dim, mrg = args.mrg, alpha = args.alpha).cuda()
+    '''
+    # DML Losses
+    if args.loss == 'Proxy_Anchor':
+        criterion = losses.Proxy_Anchor(nb_classes = nb_classes, sz_embed = args.sz_embedding, mrg = args.mrg, alpha = args.alpha).cuda()
+    elif args.loss == 'Proxy_NCA':
+        criterion = losses.Proxy_NCA(nb_classes = nb_classes, sz_embed = args.sz_embedding).cuda()
+    elif args.loss == 'MS':
+        criterion = losses.MultiSimilarityLoss().cuda()
+    elif args.loss == 'Contrastive':
+        criterion = losses.ContrastiveLoss().cuda()
+    elif args.loss == 'Triplet':
+        criterion = losses.TripletLoss().cuda()
+    elif args.loss == 'NPair':
+        criterion = losses.NPairLoss().cuda()
+    '''
     #model = torchvision.models.detection.fasterrcnn_resnet50_fpn(num_classes=21)
     model.to(device)
 
@@ -173,7 +209,7 @@ def main(args):
         {
             "params":
                 [p for n, p in model_without_ddp.named_parameters()
-                 if not match_name_keywords(n, args.lr_backbone_names) and not match_name_keywords(n, args.lr_linear_proj_names) and p.requires_grad],
+                if not match_name_keywords(n, args.lr_backbone_names) and not match_name_keywords(n, args.lr_linear_proj_names) and p.requires_grad],
             "lr": args.lr,
         },
         {
@@ -198,7 +234,7 @@ def main(args):
                                     weight_decay=args.weight_decay)
     else:
         optimizer = torch.optim.AdamW(param_dicts, lr=args.lr,
-                                      weight_decay=args.weight_decay)
+                                    weight_decay=args.weight_decay)
     
     #prev_
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
@@ -259,7 +295,7 @@ def main(args):
     
     if args.eval:
         test_stats, coco_evaluator = evaluate(model, criterion, postprocessors,
-                                              device, args.output_dir,args)
+                                            device, args.output_dir,args)
         if args.output_dir:
             utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
         return
@@ -321,8 +357,8 @@ def main(args):
             
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in test_stats.items()},
-                     'epoch': epoch,
-                     'n_parameters': n_parameters}
+                    'epoch': epoch,
+                    'n_parameters': n_parameters}
 
         if args.output_dir and utils.is_main_process():
             with (output_dir / "log.txt").open("a") as f:
@@ -337,7 +373,7 @@ def main(args):
                         filenames.append(f'{epoch:03}.pth')
                     for name in filenames:
                         torch.save(coco_evaluator.coco_eval["bbox"].eval,
-                                   output_dir / "eval" / name)
+                            output_dir / "eval" / name)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))

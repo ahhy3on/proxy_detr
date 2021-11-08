@@ -42,7 +42,7 @@ class FrozenBatchNorm2d(torch.nn.Module):
         self.eps = eps
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                            missing_keys, unexpected_keys, error_msgs):
         num_batches_tracked_key = prefix + 'num_batches_tracked'
         if num_batches_tracked_key in state_dict:
             del state_dict[num_batches_tracked_key]
@@ -97,9 +97,9 @@ class BackboneBase(nn.Module):
 class Backbone(BackboneBase):
     """ResNet backbone with frozen BatchNorm."""
     def __init__(self, name: str,
-                 train_backbone: bool,
-                 return_interm_layers: bool,
-                 dilation: bool):
+                train_backbone: bool,
+                return_interm_layers: bool,
+                dilation: bool):
         norm_layer = FrozenBatchNorm2d
         backbone = getattr(torchvision.models, name)(
             replace_stride_with_dilation=[False, False, dilation],
